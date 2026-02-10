@@ -114,15 +114,14 @@ public class NPatch {
 
     private static final String ANDROID_MANIFEST_XML = "AndroidManifest.xml";
     private static final HashSet<String> ARCHES = new HashSet<>(Arrays.asList(
-            "armeabi-v7a",
             "arm64-v8a",
-            "x86",
             "x86_64"
     ));
 
     private static final ZFileOptions Z_FILE_OPTIONS = new ZFileOptions().setAlignmentRule(AlignmentRules.compose(
             AlignmentRules.constantForSuffix(".so", 4096),
-            AlignmentRules.constantForSuffix(ORIGINAL_APK_ASSET_PATH, 4096)
+            AlignmentRules.constantForSuffix(ORIGINAL_APK_ASSET_PATH, 4096),
+            AlignmentRules.constantForSuffix(".arsc", 4)
     ));
 
     private final JCommander jCommander;
@@ -360,7 +359,17 @@ public class NPatch {
                 if (!injectDex && name.startsWith("classes") && name.endsWith(".dex")) continue;
                 if (name.equals("AndroidManifest.xml")) continue;
                 if (name.startsWith("META-INF") && (name.endsWith(".SF") || name.endsWith(".MF") || name.endsWith(".RSA"))) continue;
-                srcZFile.addFileLink(name, name);
+
+                try (InputStream is = entry.open()) {
+                    if (name.endsWith(".so")) {
+                    if (name.endsWith(".so") || name.equals("resources.arsc")) {
+                        dstZFile.add(name, is, false);
+                    } else {
+                        dstZFile.add(name, is);
+                    }
+                } catch (IOException e) {
+                    throw new PatchError("Failed to copy entry: " + name, e);
+                }
             }
 
             dstZFile.realign();
