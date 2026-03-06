@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.Patcher
 import org.lsposed.npatch.share.PatchConfig
 import nkbe.util.NPackageManager
@@ -99,7 +100,8 @@ class NewPatchViewModel : ViewModel() {
     private fun submitPatch() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, outputLog, newPackageName)
+        val installerSource = getInstallerSource(patchApp.app.packageName)
+        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, outputLog, newPackageName, installerSource)
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,
@@ -108,6 +110,32 @@ class NewPatchViewModel : ViewModel() {
             embeddedModules = embeddedModules.flatMap { listOf(it.app.sourceDir) + (it.app.splitSourceDirs ?: emptyArray()) }
         )
         patchState = PatchState.PATCHING
+    }
+
+    private fun getInstallerSource(packageName: String): String {
+        return try {
+            val pm = lspApp.packageManager
+            val sourceInfo = pm.getInstallSourceInfo(packageName)
+            val installer = sourceInfo.installingPackageName ?: sourceInfo.initiatingPackageName ?: ""
+            when {
+                installer.contains("vending") -> "Google Play"
+                installer.contains("samsungapps") -> "Galaxy Store"
+                installer.contains("amazon") -> "Amazon Appstore"
+                installer.contains("huawei") || installer.contains("hicloud") -> "Huawei AppGallery"
+                installer.contains("xiaomi") || installer.contains("miui") || installer.contains("getapps") -> "Xiaomi GetApps"
+                installer.contains("oppo") || installer.contains("heytap") -> "OPPO App Market"
+                installer.contains("vivo") -> "vivo App Store"
+                installer.contains("tencent") || installer.contains("myapp") -> "Tencent MyApp"
+                installer.contains("coolapk") -> "Coolapk"
+                installer.contains("wandoujia") -> "Wandoujia"
+                installer.contains("fdroid") -> "F-Droid"
+                installer.isNotEmpty() -> installer
+                else -> "Unknown"
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get installer source for $packageName", e)
+            "Unknown"
+        }
     }
 
     private suspend fun launchPatch() {

@@ -104,6 +104,9 @@ public class NPatch {
     @Parameter(names = {"-v", "--verbose"}, description = "Verbose output")
     private boolean verbose = false;
 
+    @Parameter(names = {"--installerSource"}, description = "Original app installer source (e.g. Google Play, Samsung Galaxy Store)")
+    private String installerSource = "";
+
     @Parameter(names = {"-m", "--embed"}, description = "Embed provided modules to apk")
     private List<String> modules = new ArrayList<>();
 
@@ -161,14 +164,14 @@ public class NPatch {
     }
 
     public void doCommandLine() throws PatchError, IOException {
+        var outputDir = new File(outputPath);
+        //noinspection ResultOfMethodCallIgnored
+        outputDir.mkdirs();
+
+        boolean isFirst = true;
         for (var apk : apkPaths) {
             File srcApkFile = new File(apk).getAbsoluteFile();
-
             String apkFileName = srcApkFile.getName();
-
-            var outputDir = new File(outputPath);
-            //noinspection ResultOfMethodCallIgnored
-            outputDir.mkdirs();
 
             File outputFile = new File(outputDir, String.format(
                     Locale.getDefault(), "%s-%d-npatched.apk",
@@ -178,9 +181,20 @@ public class NPatch {
 
             if (outputFile.exists() && !forceOverwrite)
                 throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
-            logger.i("Processing " + srcApkFile + " -> " + outputFile);
 
-            patch(srcApkFile, outputFile);
+            if (isFirst) {
+                // Patch the base APK
+                logger.i("Processing " + srcApkFile + " -> " + outputFile);
+                patch(srcApkFile, outputFile);
+                isFirst = false;
+            } else {
+                // For split APKs, copy as-is (only base needs patching)
+                logger.i("Copying split apk " + srcApkFile + " -> " + outputFile);
+                try (var in_ = new java.io.FileInputStream(srcApkFile);
+                     var out_ = new java.io.FileOutputStream(outputFile)) {
+                    in_.transferTo(out_);
+                }
+            }
         }
     }
 
@@ -287,7 +301,7 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage);
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource);
             final var configBytes = new Gson().toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage))) {

@@ -186,6 +186,14 @@ fun AppManageBody(
                                             fontFamily = FontFamily.Serif,
                                             style = MaterialTheme.typography.bodySmall
                                         )
+                                        if (!patchConfig.installerSource.isNullOrEmpty() && patchConfig.installerSource != "Unknown") {
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = patchConfig.installerSource,
+                                                color = MaterialTheme.colorScheme.outline,
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
                                         if (canUpdateLoader) {
                                             with(LocalDensity.current) {
                                                 val size = MaterialTheme.typography.bodySmall.fontSize * 1.2

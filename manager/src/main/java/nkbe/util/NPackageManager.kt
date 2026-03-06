@@ -181,18 +181,30 @@ object NPackageManager {
             runCatching {
                 var primary: ApplicationInfo? = null
                 val splits = mutableListOf<String>()
-                val appInfos = apks.mapNotNull { uri ->
+                val resolvedFiles = mutableListOf<File>()
+
+                // First pass: copy files and extract XAPK/APKS bundles
+                for (uri in apks) {
                     val src = DocumentFile.fromSingleUri(lspApp, uri)
                         ?: throw IOException("DocumentFile is null")
-                    val dst = lspApp.tmpApkDir.resolve(src.name!!)
+                    val name = src.name ?: "unknown.apk"
+                    val dst = lspApp.tmpApkDir.resolve(name)
                     val input = lspApp.contentResolver.openInputStream(uri)
                         ?: throw IOException("InputStream is null")
-                    input.use {
-                        dst.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
+                    input.use { dst.outputStream().use { out -> it.copyTo(out) } }
 
+                    val lowerName = name.lowercase()
+                    if (lowerName.endsWith(".xapk") || lowerName.endsWith(".apks") || lowerName.endsWith(".apkm")) {
+                        // Extract APKs from ZIP-based bundle
+                        extractApksFromBundle(dst, resolvedFiles)
+                        dst.delete()
+                    } else {
+                        resolvedFiles.add(dst)
+                    }
+                }
+
+                // Second pass: parse APK info
+                val appInfos = resolvedFiles.mapNotNull { dst ->
                     val appInfo = lspApp.packageManager.getPackageArchiveInfo(
                         dst.absolutePath, PackageManager.GET_META_DATA
                     )?.applicationInfo
@@ -207,15 +219,33 @@ object NPackageManager {
                     val label = lspApp.packageManager.getApplicationLabel(appInfo).toString()
                     AppInfo(appInfo, label)
                 }
-                // TODO: Check selected apks are from the same app
                 primary?.splitSourceDirs = splits.toTypedArray()
-                if (appInfos.isEmpty()) throw IOException("No apks")
+                if (appInfos.isEmpty()) throw IOException("No valid APKs found")
                 appInfos
             }.recoverCatching { t ->
                 cleanTmpApkDir()
                 Log.e(TAG, "Failed to load apks", t)
                 throw t
             }
+        }
+    }
+
+    private fun extractApksFromBundle(bundle: File, outFiles: MutableList<File>) {
+        try {
+            java.util.zip.ZipFile(bundle).use { zip ->
+                zip.entries().asSequence()
+                    .filter { !it.isDirectory && it.name.lowercase().endsWith(".apk") }
+                    .forEach { entry ->
+                        val name = entry.name.substringAfterLast('/')
+                        val dst = lspApp.tmpApkDir.resolve(name)
+                        zip.getInputStream(entry).use { input ->
+                            dst.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        outFiles.add(dst)
+                    }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract APK bundle: ${bundle.name}", e)
         }
     }
 

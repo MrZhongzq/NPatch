@@ -36,6 +36,9 @@ object Patcher {
                 }
                 if (config.injectProvider) add("--provider")
                 if(injectDex) add("--injectdex")
+                if (config.installerSource != null && config.installerSource.isNotEmpty()) {
+                    add("--installerSource"); add(config.installerSource)
+                }
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
                 }

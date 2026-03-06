@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import org.lsposed.npatch.R
 import org.lsposed.npatch.ui.activity.MainActivity
 
@@ -26,10 +28,28 @@ class KeepAliveService : Service() {
         }
     }
 
+    private val handler = Handler(Looper.getMainLooper())
+    private val notificationChecker = object : Runnable {
+        override fun run() {
+            val nm = getSystemService(NotificationManager::class.java)
+            val active = nm.activeNotifications.any { it.id == NOTIFICATION_ID }
+            if (!active) {
+                nm.notify(NOTIFICATION_ID, buildNotification())
+            }
+            handler.postDelayed(this, 15_000L)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
+        handler.postDelayed(notificationChecker, 15_000L)
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(notificationChecker)
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -38,11 +58,17 @@ class KeepAliveService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIFICATION_ID, buildNotification())
+    }
+
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.notification_channel_keepalive),
-            NotificationManager.IMPORTANCE_MIN
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             setShowBadge(false)
             enableLights(false)
@@ -65,6 +91,7 @@ class KeepAliveService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 }

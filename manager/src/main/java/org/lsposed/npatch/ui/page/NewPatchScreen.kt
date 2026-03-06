@@ -134,7 +134,13 @@ fun NewPatchScreen(
                 NPackageManager.cleanTmpApkDir()
                 when (id) {
                     ACTION_STORAGE -> {
-                        storageLauncher.launch(arrayOf("application/vnd.android.package-archive"))
+                        storageLauncher.launch(arrayOf(
+                            "application/vnd.android.package-archive",
+                            "application/octet-stream",
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "*/*"
+                        ))
                         viewModel.dispatch(ViewAction.DoneInit)
                     }
 
