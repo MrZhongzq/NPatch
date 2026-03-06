@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Ballot
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
 import org.lsposed.npatch.R
 import org.lsposed.npatch.config.Configs
 import org.lsposed.npatch.config.MyKeyStore
+import org.lsposed.npatch.manager.KeepAliveService
 import org.lsposed.npatch.ui.component.AnywhereDropdown
 import org.lsposed.npatch.ui.component.CenterTopBar
 import org.lsposed.npatch.ui.component.settings.SettingsItem
@@ -54,6 +56,7 @@ fun SettingsScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 16.dp)
         ) {
+            KeepAliveToggle()
             KeyStore()
             DetailPatchLogs()
             StorageDirectory()
@@ -249,6 +252,25 @@ private fun KeyStore() {
             }
         )
     }
+}
+
+@Composable
+private fun KeepAliveToggle() {
+    val context = LocalContext.current
+    SettingsSwitch(
+        modifier = Modifier.clickable {
+            Configs.keepAlive = !Configs.keepAlive
+            if (Configs.keepAlive) {
+                KeepAliveService.start(context)
+            } else {
+                KeepAliveService.stop(context)
+            }
+        },
+        checked = Configs.keepAlive,
+        icon = Icons.Outlined.NotificationsActive,
+        title = stringResource(R.string.settings_keep_alive),
+        desc = stringResource(R.string.settings_keep_alive_desc)
+    )
 }
 
 @Composable

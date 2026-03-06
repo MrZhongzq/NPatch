@@ -7,7 +7,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.lsposed.hiddenapibypass.HiddenApiBypass
+import org.lsposed.npatch.config.Configs
 import org.lsposed.npatch.manager.AppBroadcastReceiver
+import org.lsposed.npatch.manager.KeepAliveService
 import nkbe.util.NPackageManager
 import nkbe.util.ShizukuApi
 import java.io.File
@@ -33,6 +35,9 @@ class LSPApplication : Application() {
         prefs = lspApp.getSharedPreferences("settings", Context.MODE_PRIVATE)
         ShizukuApi.init()
         AppBroadcastReceiver.register(this)
+        if (Configs.keepAlive) {
+            KeepAliveService.start(this)
+        }
         globalScope.launch { NPackageManager.fetchAppList() }
     }
 

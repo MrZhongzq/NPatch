@@ -24,7 +24,7 @@ import java.util.List;
 
 public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
     private static final String TAG = "NPatch";
-    private static final String AUTHORITY = "org.zzqhmbb.NPatch.manager.provider.config";
+    private static final String AUTHORITY = "org.lsposed.npatch.manager.provider.config";
     private static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY + "/config");
 
     private final List<Module> cachedModule;

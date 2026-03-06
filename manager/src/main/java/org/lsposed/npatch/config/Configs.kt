@@ -12,6 +12,7 @@ object Configs {
     private const val PREFS_KEYSTORE_ALIAS_PASSWORD = "keystore_alias_password"
     private const val PREFS_STORAGE_DIRECTORY = "storage_directory"
     private const val PREFS_DETAIL_PATCH_LOGS = "detail_patch_logs"
+    private const val PREFS_KEEP_ALIVE = "keep_alive"
 
     var keyStorePassword by delegateStateOf(lspApp.prefs.getString(PREFS_KEYSTORE_PASSWORD, "123456")!!) {
         lspApp.prefs.edit().putString(PREFS_KEYSTORE_PASSWORD, it).apply()
@@ -31,5 +32,9 @@ object Configs {
 
     var detailPatchLogs by delegateStateOf(lspApp.prefs.getBoolean(PREFS_DETAIL_PATCH_LOGS, true)) {
         lspApp.prefs.edit().putBoolean(PREFS_DETAIL_PATCH_LOGS, it).apply()
+    }
+
+    var keepAlive by delegateStateOf(lspApp.prefs.getBoolean(PREFS_KEEP_ALIVE, true)) {
+        lspApp.prefs.edit().putBoolean(PREFS_KEEP_ALIVE, it).apply()
     }
 }

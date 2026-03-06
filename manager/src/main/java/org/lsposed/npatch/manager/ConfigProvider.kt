@@ -12,7 +12,7 @@ import org.lsposed.npatch.config.ConfigManager
 class ConfigProvider : ContentProvider() {
 
     companion object {
-        const val AUTHORITY = "org.zzqhmbb.NPatch.manager.provider.config"
+        const val AUTHORITY = "org.lsposed.npatch.manager.provider.config"
         const val TAG = "ConfigProvider"
     }
 

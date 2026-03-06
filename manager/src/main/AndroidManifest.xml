@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:name=".LSPApplication"
@@ -91,9 +94,18 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <service
+            android:name=".manager.KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps NPatch manager alive to serve patched apps" />
+        </service>
+
         <provider
             android:name=".manager.ConfigProvider"
-            android:authorities="org.zzqhmbb.NPatch.manager.provider.config"
+            android:authorities="org.lsposed.npatch.manager.provider.config"
             android:exported="true"
             android:enabled="true" />
 

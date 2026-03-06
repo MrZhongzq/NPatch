@@ -105,6 +105,31 @@
     <string name="settings_storage_directory">change storage directory</string>
     <string name="settings_detail_patch_logs">Detail patch logs</string>
     
+    <!-- Foreground Service -->
+    <string name="settings_keep_alive">Keep alive notification</string>
+    <string name="settings_keep_alive_desc">Show a persistent notification to prevent being killed by the system</string>
+    <string name="notification_channel_keepalive">Keep Alive</string>
+    <string name="notification_keepalive_title">NPatch is running</string>
+    <string name="notification_keepalive_text">Keeping patched apps alive</string>
+
+    <!-- Logs Screen -->
+    <string name="logs_empty">No logs found</string>
+    <string name="logs_filter_time">Time range</string>
+    <string name="logs_filter_level">Log level</string>
+    <string name="logs_time_1h">1 hour</string>
+    <string name="logs_time_6h">6 hours</string>
+    <string name="logs_time_12h">12 hours</string>
+    <string name="logs_time_1d">1 day</string>
+    <string name="logs_time_all">All</string>
+    <string name="logs_level_info">Info</string>
+    <string name="logs_level_debug">Debug</string>
+    <string name="logs_level_warning">Warning</string>
+    <string name="logs_level_error">Error</string>
+    <string name="logs_export">Export</string>
+    <string name="logs_exported">Logs exported to %1$s</string>
+    <string name="logs_export_failed">Failed to export logs</string>
+    <string name="logs_refresh">Refresh</string>
+
     <!-- MiUI Uninstall Desc -->
     <string name="miui_uninstall_title">💩卸💩载💩金💩凡💩</string>
     <string name="miui_uninstall_content">金凡祭天，法力无边\n所以這就是那個魔改到連使用者列表都無法訪問的系統嗎?
