@@ -212,11 +212,14 @@ public class NPatch {
                             .setCertificates((X509Certificate[]) entry.getCertificateChain())
                             .setKey(entry.getPrivateKey())
                             .build()).register(dstZFile);
-                    // Copy all entries from source
+                    // Copy all entries from source, preserving compression
                     for (StoredEntry storedEntry : srcZFile.entries()) {
                         String name = storedEntry.getCentralDirectoryHeader().getName();
                         if (name.startsWith("META-INF/")) continue;
-                        dstZFile.add(name, storedEntry.open());
+                        boolean isCompressed = storedEntry.getCentralDirectoryHeader()
+                                .getCompressionInfoWithWait().getMethod()
+                                .ordinal() != 0;
+                        dstZFile.add(name, storedEntry.open(), !isCompressed);
                     }
                 } catch (Exception e) {
                     throw new PatchError("Failed to re-sign split APK: " + e.getMessage());
