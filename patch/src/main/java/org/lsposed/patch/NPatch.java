@@ -168,65 +168,67 @@ public class NPatch {
         //noinspection ResultOfMethodCallIgnored
         outputDir.mkdirs();
 
-        boolean isFirst = true;
-        for (var apk : apkPaths) {
-            File srcApkFile = new File(apk).getAbsoluteFile();
-            String apkFileName = srcApkFile.getName();
+        // If multiple APKs (split APK), merge them into one before patching
+        File srcApkFile;
+        if (apkPaths.size() > 1) {
+            logger.i("Merging " + apkPaths.size() + " split APKs into single APK...");
+            srcApkFile = mergeSplitApks(apkPaths, outputDir);
+            logger.i("Merged APK: " + srcApkFile);
+        } else {
+            srcApkFile = new File(apkPaths.get(0)).getAbsoluteFile();
+        }
 
-            File outputFile = new File(outputDir, String.format(
-                    Locale.getDefault(), "%s-%d-npatched.apk",
-                    FilenameUtils.getBaseName(apkFileName),
-                    LSPConfig.instance.VERSION_CODE)
-            ).getAbsoluteFile();
+        String apkFileName = srcApkFile.getName();
+        File outputFile = new File(outputDir, String.format(
+                Locale.getDefault(), "%s-%d-npatched.apk",
+                FilenameUtils.getBaseName(apkFileName),
+                LSPConfig.instance.VERSION_CODE)
+        ).getAbsoluteFile();
 
-            if (outputFile.exists() && !forceOverwrite)
-                throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
+        if (outputFile.exists() && !forceOverwrite)
+            throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
+        logger.i("Processing " + srcApkFile + " -> " + outputFile);
+        patch(srcApkFile, outputFile);
+    }
 
-            if (isFirst) {
-                // Patch the base APK
-                logger.i("Processing " + srcApkFile + " -> " + outputFile);
-                patch(srcApkFile, outputFile);
-                isFirst = false;
-            } else {
-                // For split APKs, re-sign with same key (signatures must match base)
-                logger.i("Re-signing split apk " + srcApkFile + " -> " + outputFile);
-                try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
-                     ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
-                    // Sign with same keystore
-                    var keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-                    if (keystoreArgs.get(0) == null) {
-                        try (var is = getClass().getClassLoader().getResourceAsStream("assets/keystore")) {
-                            keyStore.load(is, keystoreArgs.get(1).toCharArray());
-                        }
-                    } else {
-                        try (var is = new FileInputStream(keystoreArgs.get(0))) {
-                            keyStore.load(is, keystoreArgs.get(1).toCharArray());
-                        }
-                    }
-                    var entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(
-                            keystoreArgs.get(2),
-                            new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
-                    new SigningExtension(SigningOptions.builder()
-                            .setMinSdkVersion(27)
-                            .setV2SigningEnabled(true)
-                            .setCertificates((X509Certificate[]) entry.getCertificateChain())
-                            .setKey(entry.getPrivateKey())
-                            .build()).register(dstZFile);
-                    // Copy all entries from source, preserving compression
-                    for (StoredEntry storedEntry : srcZFile.entries()) {
-                        String name = storedEntry.getCentralDirectoryHeader().getName();
-                        if (name.startsWith("META-INF/")) continue;
-                        boolean isStored = storedEntry.getCentralDirectoryHeader()
-                                .getCompressionInfoWithWait().getMethod()
-                                == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
-                        // Third param = false means "do not compress" (store as-is)
-                        dstZFile.add(name, storedEntry.open(), !isStored);
-                    }
-                } catch (Exception e) {
-                    throw new PatchError("Failed to re-sign split APK: " + e.getMessage());
+    private File mergeSplitApks(List<String> paths, File outputDir) throws PatchError, IOException {
+        File baseApk = new File(paths.get(0)).getAbsoluteFile();
+        File mergedFile = new File(outputDir, "merged_" + baseApk.getName());
+        mergedFile.delete();
+
+        try (ZFile merged = ZFile.openReadWrite(mergedFile, Z_FILE_OPTIONS)) {
+            // Copy base APK first
+            try (ZFile base = ZFile.openReadOnly(baseApk)) {
+                for (StoredEntry entry : base.entries()) {
+                    String name = entry.getCentralDirectoryHeader().getName();
+                    boolean isStored = entry.getCentralDirectoryHeader()
+                            .getCompressionInfoWithWait().getMethod()
+                            == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+                    merged.add(name, entry.open(), !isStored);
                 }
             }
+
+            // Merge entries from split APKs (skip duplicates and META-INF)
+            for (int i = 1; i < paths.size(); i++) {
+                File splitFile = new File(paths.get(i)).getAbsoluteFile();
+                logger.i("  Merging split: " + splitFile.getName());
+                try (ZFile split = ZFile.openReadOnly(splitFile)) {
+                    for (StoredEntry entry : split.entries()) {
+                        String name = entry.getCentralDirectoryHeader().getName();
+                        if (name.startsWith("META-INF/")) continue;
+                        if (name.equals("AndroidManifest.xml")) continue;
+                        // Skip if already exists in merged
+                        if (merged.get(name) != null) continue;
+                        boolean isStored = entry.getCentralDirectoryHeader()
+                                .getCompressionInfoWithWait().getMethod()
+                                == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+                        merged.add(name, entry.open(), !isStored);
+                    }
+                }
+            }
+            merged.realign();
         }
+        return mergedFile;
     }
 
     public void patch(File srcApkFile, File outputFile) throws PatchError, IOException {
