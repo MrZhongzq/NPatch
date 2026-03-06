@@ -38,9 +38,6 @@ include(
     ":hiddenapi:bridge",
     ":hiddenapi:stubs",
     ":jar",
-    ":libxposed:api",
-    ":libxposed:compat",
-    ":libxposed:service",
     ":manager",
     ":meta-loader",
     ":patch",
@@ -58,9 +55,6 @@ project(":external:apache").projectDir = file("core/external/apache")
 project(":external:axml").projectDir = file("core/external/axml")
 project(":hiddenapi:bridge").projectDir = file("core/hiddenapi/bridge")
 project(":hiddenapi:stubs").projectDir = file("core/hiddenapi/stubs")
-project(":libxposed:api").projectDir = file("core/libxposed/api")
-project(":libxposed:compat").projectDir = file("core/libxposed/compat")
-project(":libxposed:service").projectDir = file("core/libxposed/service")
 project(":services:daemon-service").projectDir = file("core/services/daemon-service")
 project(":services:manager-service").projectDir = file("core/services/manager-service")
 project(":services:xposed-service:interface").projectDir = file("core/services/xposed-service/interface")
