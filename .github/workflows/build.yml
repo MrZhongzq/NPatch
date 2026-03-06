@@ -144,3 +144,11 @@ jobs:
         name: symbols-${{ env.commit }}
         path: |
           patch-loader/build/symbols
+
+    - name: 上傳 Manager APK
+      uses: actions/upload-artifact@v5
+      with:
+        name: npatch-manager-${{ env.commit }}
+        path: |
+          manager/build/outputs/apk/**/*.apk
+        retention-days: 14
