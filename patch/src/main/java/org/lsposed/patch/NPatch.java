@@ -188,11 +188,38 @@ public class NPatch {
                 patch(srcApkFile, outputFile);
                 isFirst = false;
             } else {
-                // For split APKs, copy as-is (only base needs patching)
-                logger.i("Copying split apk " + srcApkFile + " -> " + outputFile);
-                try (var in_ = new java.io.FileInputStream(srcApkFile);
-                     var out_ = new java.io.FileOutputStream(outputFile)) {
-                    in_.transferTo(out_);
+                // For split APKs, re-sign with same key (signatures must match base)
+                logger.i("Re-signing split apk " + srcApkFile + " -> " + outputFile);
+                try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
+                     ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
+                    // Sign with same keystore
+                    var keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+                    if (keystoreArgs.get(0) == null) {
+                        try (var is = getClass().getClassLoader().getResourceAsStream("assets/keystore")) {
+                            keyStore.load(is, keystoreArgs.get(1).toCharArray());
+                        }
+                    } else {
+                        try (var is = new FileInputStream(keystoreArgs.get(0))) {
+                            keyStore.load(is, keystoreArgs.get(1).toCharArray());
+                        }
+                    }
+                    var entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(
+                            keystoreArgs.get(2),
+                            new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
+                    new SigningExtension(SigningOptions.builder()
+                            .setMinSdkVersion(27)
+                            .setV2SigningEnabled(true)
+                            .setCertificates((X509Certificate[]) entry.getCertificateChain())
+                            .setKey(entry.getPrivateKey())
+                            .build()).register(dstZFile);
+                    // Copy all entries from source
+                    for (StoredEntry storedEntry : srcZFile.entries()) {
+                        String name = storedEntry.getCentralDirectoryHeader().getName();
+                        if (name.startsWith("META-INF/")) continue;
+                        dstZFile.add(name, storedEntry.open());
+                    }
+                } catch (Exception e) {
+                    throw new PatchError("Failed to re-sign split APK: " + e.getMessage());
                 }
             }
         }
