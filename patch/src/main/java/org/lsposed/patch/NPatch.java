@@ -216,10 +216,11 @@ public class NPatch {
                     for (StoredEntry storedEntry : srcZFile.entries()) {
                         String name = storedEntry.getCentralDirectoryHeader().getName();
                         if (name.startsWith("META-INF/")) continue;
-                        boolean isCompressed = storedEntry.getCentralDirectoryHeader()
+                        boolean isStored = storedEntry.getCentralDirectoryHeader()
                                 .getCompressionInfoWithWait().getMethod()
-                                .ordinal() != 0;
-                        dstZFile.add(name, storedEntry.open(), !isCompressed);
+                                == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+                        // Third param = false means "do not compress" (store as-is)
+                        dstZFile.add(name, storedEntry.open(), !isStored);
                     }
                 } catch (Exception e) {
                     throw new PatchError("Failed to re-sign split APK: " + e.getMessage());
