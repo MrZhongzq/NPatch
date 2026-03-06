@@ -169,6 +169,13 @@ public class NPatch {
         outputDir.mkdirs();
 
         // If multiple APKs (split APK), merge them into one before patching
+        // Extract original signature from base APK BEFORE merging (merge invalidates signing block)
+        File originalBaseApk = new File(apkPaths.get(0)).getAbsoluteFile();
+        String preExtractedSignature = null;
+        if (apkPaths.size() > 1 && sigbypassLevel > 0) {
+            preExtractedSignature = ApkSignatureHelper.getApkSignInfo(originalBaseApk.getAbsolutePath());
+        }
+
         File srcApkFile;
         if (apkPaths.size() > 1) {
             logger.i("Merging " + apkPaths.size() + " split APKs into single APK...");
@@ -188,7 +195,7 @@ public class NPatch {
         if (outputFile.exists() && !forceOverwrite)
             throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
         logger.i("Processing " + srcApkFile + " -> " + outputFile);
-        patch(srcApkFile, outputFile);
+        patch(srcApkFile, outputFile, preExtractedSignature);
     }
 
     private File mergeSplitApks(List<String> paths, File outputDir) throws PatchError, IOException {
@@ -225,6 +232,10 @@ public class NPatch {
     }
 
     public void patch(File srcApkFile, File outputFile) throws PatchError, IOException {
+        patch(srcApkFile, outputFile, null);
+    }
+
+    public void patch(File srcApkFile, File outputFile, String preExtractedSignature) throws PatchError, IOException {
         if (!srcApkFile.exists())
             throw new PatchError("The source apk file does not exit. Please provide a correct path.");
 
@@ -269,7 +280,8 @@ public class NPatch {
 
             String originalSignature = null;
             if (sigbypassLevel > 0) {
-                originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+                originalSignature = preExtractedSignature != null ? preExtractedSignature
+                        : ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                 if (originalSignature == null || originalSignature.isEmpty()) {
                     throw new PatchError("get original signature failed");
                 }
