@@ -485,6 +485,11 @@ public class NPatch {
             property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, 27));
         property.addApplicationAttribute(new AttributeItem(NodeValue.Application.DEBUGGABLE, debuggableFlag));
         property.addApplicationAttribute(new AttributeItem("appComponentFactory", PROXY_APP_COMPONENT_FACTORY));
+        // Remove split APK requirement for merged APKs
+        property.addApplicationAttribute(new AttributeItem("isSplitRequired", false));
+        property.addManifestAttribute(new AttributeItem("isSplitRequired", false));
+        property.deleteMetaData("com.android.vending.splits.required");
+        property.deleteMetaData("com.android.vending.splits");
         if (!targetPackage.equals(originPackage)) {
             property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.PACKAGE, targetPackage).setNamespace(null));
         }
