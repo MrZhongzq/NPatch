@@ -5,4 +5,4 @@
 [submodule "core"]
 	path = core
 	url = https://github.com/MrZhongzq/LSPosed-Irena.git
-	branch = master
+	branch = dev
