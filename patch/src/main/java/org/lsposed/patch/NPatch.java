@@ -488,8 +488,8 @@ public class NPatch {
         // Remove split APK requirement for merged APKs
         property.addApplicationAttribute(new AttributeItem("isSplitRequired", false));
         property.addManifestAttribute(new AttributeItem("isSplitRequired", false));
-        property.deleteMetaData("com.android.vending.splits.required");
-        property.deleteMetaData("com.android.vending.splits");
+        property.addDeleteMetaData("com.android.vending.splits.required");
+        property.addDeleteMetaData("com.android.vending.splits");
         if (!targetPackage.equals(originPackage)) {
             property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.PACKAGE, targetPackage).setNamespace(null));
         }
