@@ -193,22 +193,16 @@ public class NPatch {
 
     private File mergeSplitApks(List<String> paths, File outputDir) throws PatchError, IOException {
         File baseApk = new File(paths.get(0)).getAbsoluteFile();
+        // Copy base APK to preserve its signing block for signature bypass
         File mergedFile = new File(outputDir, "merged_" + baseApk.getName());
         mergedFile.delete();
+        try (var in_ = new FileInputStream(baseApk);
+             var out_ = new java.io.FileOutputStream(mergedFile)) {
+            in_.transferTo(out_);
+        }
 
+        // Add split APK entries into the copied base APK
         try (ZFile merged = ZFile.openReadWrite(mergedFile, Z_FILE_OPTIONS)) {
-            // Copy base APK first
-            try (ZFile base = ZFile.openReadOnly(baseApk)) {
-                for (StoredEntry entry : base.entries()) {
-                    String name = entry.getCentralDirectoryHeader().getName();
-                    boolean isStored = entry.getCentralDirectoryHeader()
-                            .getCompressionInfoWithWait().getMethod()
-                            == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
-                    merged.add(name, entry.open(), !isStored);
-                }
-            }
-
-            // Merge entries from split APKs (skip duplicates and META-INF)
             for (int i = 1; i < paths.size(); i++) {
                 File splitFile = new File(paths.get(i)).getAbsoluteFile();
                 logger.i("  Merging split: " + splitFile.getName());
@@ -217,7 +211,6 @@ public class NPatch {
                         String name = entry.getCentralDirectoryHeader().getName();
                         if (name.startsWith("META-INF/")) continue;
                         if (name.equals("AndroidManifest.xml")) continue;
-                        // Skip if already exists in merged
                         if (merged.get(name) != null) continue;
                         boolean isStored = entry.getCentralDirectoryHeader()
                                 .getCompressionInfoWithWait().getMethod()
