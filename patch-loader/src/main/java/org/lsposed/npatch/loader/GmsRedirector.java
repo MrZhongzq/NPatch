@@ -17,31 +17,78 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * Redirects Google Play Services IPC from the real GMS to NPatch's built-in MicroG.
+ * Redirects Google Play Services IPC from the real GMS to a MicroG-based GMS.
+ * Supports multiple MicroG package names (NPatch GMS, ReVanced GmsCore, etc.)
  * This runs inside the patched app's process via Xposed hooks.
- *
- * Hooks:
- * 1. Intent construction - redirect package/component to NPatch GMS
- * 2. ContentResolver - redirect authority URIs
- * 3. PackageManager.getPackageInfo - spoof GMS signature
  */
 public class GmsRedirector {
     private static final String TAG = "NPatch-GmsRedirect";
     private static final String REAL_GMS = Constants.REAL_GMS_PACKAGE_NAME;
-    private static final String NPATCH_GMS = Constants.NPATCH_GMS_PACKAGE_NAME;
 
+    // Supported MicroG package names in priority order
+    private static final String[] MICROG_PACKAGES = {
+            Constants.NPATCH_GMS_PACKAGE_NAME,          // org.lsposed.npatch.gms
+            "app.revanced.android.gms",                  // ReVanced GmsCore
+            "org.microg.gms",                             // Original MicroG (user-variant)
+    };
+
+    private static String targetGms = null;
     private static String originalSignature;
 
     public static void activate(Context context, String origSig) {
         originalSignature = origSig;
-        Log.i(TAG, "Activating GMS redirect: " + REAL_GMS + " -> " + NPATCH_GMS);
+
+        // Find which MicroG is installed
+        targetGms = findInstalledMicroG(context);
+        if (targetGms == null) {
+            Log.w(TAG, "No MicroG/GmsCore found! Tried: " + String.join(", ", MICROG_PACKAGES));
+            Log.w(TAG, "GMS redirect disabled - install NPatch GMS or ReVanced GmsCore");
+            return;
+        }
+
+        Log.i(TAG, "Activating GMS redirect: " + REAL_GMS + " -> " + targetGms);
 
         hookIntentSetPackage();
         hookIntentSetComponent();
+        hookIntentResolve();
         hookContentResolverAcquire();
         hookPackageManagerGetPackageInfo(context);
 
         Log.i(TAG, "GMS redirect hooks installed");
+    }
+
+    private static String findInstalledMicroG(Context context) {
+        PackageManager pm = context.getPackageManager();
+        for (String pkg : MICROG_PACKAGES) {
+            try {
+                pm.getPackageInfo(pkg, 0);
+                Log.i(TAG, "Found MicroG: " + pkg);
+                return pkg;
+            } catch (PackageManager.NameNotFoundException ignored) {}
+        }
+        return null;
+    }
+
+    private static String redirectPackage(String pkg) {
+        if (REAL_GMS.equals(pkg)) return targetGms;
+        // Also redirect com.google.android.gsf (Google Services Framework)
+        if ("com.google.android.gsf".equals(pkg)) return targetGms;
+        return null;
+    }
+
+    private static String redirectAuthority(String authority) {
+        if (authority == null) return null;
+        if (authority.startsWith(REAL_GMS + ".")) {
+            return targetGms + authority.substring(REAL_GMS.length());
+        }
+        if (authority.equals(REAL_GMS)) {
+            return targetGms;
+        }
+        // Handle GSF authorities
+        if (authority.startsWith("com.google.android.gsf")) {
+            return authority.replace("com.google.android.gsf", targetGms);
+        }
+        return null;
     }
 
     /**
@@ -53,9 +100,9 @@ public class GmsRedirector {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     String pkg = (String) param.args[0];
-                    if (REAL_GMS.equals(pkg)) {
-                        param.args[0] = NPATCH_GMS;
-                        Log.d(TAG, "Redirected Intent.setPackage: " + REAL_GMS + " -> " + NPATCH_GMS);
+                    String redirected = redirectPackage(pkg);
+                    if (redirected != null) {
+                        param.args[0] = redirected;
                     }
                 }
             });
@@ -73,21 +120,11 @@ public class GmsRedirector {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     ComponentName cn = (ComponentName) param.args[0];
-                    if (cn != null && REAL_GMS.equals(cn.getPackageName())) {
-                        param.args[0] = new ComponentName(NPATCH_GMS, cn.getClassName());
-                        Log.d(TAG, "Redirected Intent.setComponent to " + NPATCH_GMS);
-                    }
-                }
-            });
-
-            // Also hook the Intent constructor that takes ComponentName
-            XposedBridge.hookAllConstructors(Intent.class, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    Intent intent = (Intent) param.thisObject;
-                    ComponentName cn = intent.getComponent();
-                    if (cn != null && REAL_GMS.equals(cn.getPackageName())) {
-                        intent.setComponent(new ComponentName(NPATCH_GMS, cn.getClassName()));
+                    if (cn != null) {
+                        String redirected = redirectPackage(cn.getPackageName());
+                        if (redirected != null) {
+                            param.args[0] = new ComponentName(redirected, cn.getClassName());
+                        }
                     }
                 }
             });
@@ -97,61 +134,106 @@ public class GmsRedirector {
     }
 
     /**
+     * Hook Intent resolution to redirect implicit intents targeting GMS
+     */
+    private static void hookIntentResolve() {
+        try {
+            // Hook Intent constructor with action+uri to catch implicit GMS intents
+            XposedBridge.hookAllConstructors(Intent.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Intent intent = (Intent) param.thisObject;
+                    ComponentName cn = intent.getComponent();
+                    if (cn != null) {
+                        String redirected = redirectPackage(cn.getPackageName());
+                        if (redirected != null) {
+                            intent.setComponent(new ComponentName(redirected, cn.getClassName()));
+                        }
+                    }
+                    String pkg = intent.getPackage();
+                    if (pkg != null) {
+                        String redirected = redirectPackage(pkg);
+                        if (redirected != null) {
+                            intent.setPackage(redirected);
+                        }
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to hook Intent constructors", t);
+        }
+    }
+
+    /**
      * Hook ContentResolver to redirect GMS content provider URIs
      */
     private static void hookContentResolverAcquire() {
         try {
-            XposedBridge.hookAllMethods(ContentResolver.class, "acquireProvider", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.args[0] instanceof Uri) {
-                        Uri uri = (Uri) param.args[0];
-                        String authority = uri.getAuthority();
-                        if (authority != null && authority.contains(REAL_GMS)) {
-                            String newAuth = authority.replace(REAL_GMS, NPATCH_GMS);
-                            Uri newUri = uri.buildUpon().authority(newAuth).build();
-                            param.args[0] = newUri;
-                            Log.d(TAG, "Redirected ContentResolver URI: " + authority + " -> " + newAuth);
+            // Hook multiple ContentResolver methods
+            for (String method : new String[]{
+                    "acquireProvider", "acquireContentProviderClient",
+                    "acquireUnstableProvider", "acquireUnstableContentProviderClient"
+            }) {
+                try {
+                    XposedBridge.hookAllMethods(ContentResolver.class, method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.args[0] instanceof Uri) {
+                                Uri uri = (Uri) param.args[0];
+                                String authority = uri.getAuthority();
+                                String newAuth = redirectAuthority(authority);
+                                if (newAuth != null) {
+                                    param.args[0] = uri.buildUpon().authority(newAuth).build();
+                                }
+                            } else if (param.args[0] instanceof String) {
+                                String authority = (String) param.args[0];
+                                String newAuth = redirectAuthority(authority);
+                                if (newAuth != null) {
+                                    param.args[0] = newAuth;
+                                }
+                            }
                         }
-                    } else if (param.args[0] instanceof String) {
-                        String authority = (String) param.args[0];
-                        if (authority.contains(REAL_GMS)) {
-                            param.args[0] = authority.replace(REAL_GMS, NPATCH_GMS);
-                        }
-                    }
-                }
-            });
+                    });
+                } catch (Throwable ignored) {}
+            }
 
-            // Hook acquireContentProviderClient too
-            XposedBridge.hookAllMethods(ContentResolver.class, "acquireContentProviderClient", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    if (param.args[0] instanceof Uri) {
-                        Uri uri = (Uri) param.args[0];
-                        String authority = uri.getAuthority();
-                        if (authority != null && authority.contains(REAL_GMS)) {
-                            String newAuth = authority.replace(REAL_GMS, NPATCH_GMS);
-                            param.args[0] = uri.buildUpon().authority(newAuth).build();
-                        }
-                    } else if (param.args[0] instanceof String) {
-                        String name = (String) param.args[0];
-                        if (name.contains(REAL_GMS)) {
-                            param.args[0] = name.replace(REAL_GMS, NPATCH_GMS);
+            // Also hook ContentResolver.call which YouTube Music uses heavily
+            try {
+                XposedBridge.hookAllMethods(ContentResolver.class, "call", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        for (int i = 0; i < param.args.length; i++) {
+                            if (param.args[i] instanceof Uri) {
+                                Uri uri = (Uri) param.args[i];
+                                String authority = uri.getAuthority();
+                                String newAuth = redirectAuthority(authority);
+                                if (newAuth != null) {
+                                    param.args[i] = uri.buildUpon().authority(newAuth).build();
+                                }
+                            } else if (param.args[i] instanceof String && i == 0) {
+                                // First string arg might be authority
+                                String authority = (String) param.args[i];
+                                String newAuth = redirectAuthority(authority);
+                                if (newAuth != null) {
+                                    param.args[i] = newAuth;
+                                }
+                            }
                         }
                     }
-                }
-            });
+                });
+            } catch (Throwable ignored) {}
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook ContentResolver", t);
         }
     }
 
     /**
-     * Hook PackageManager to spoof the NPatch GMS signature as the original Google signature.
+     * Hook PackageManager to spoof the MicroG signature as the original Google signature.
      * This makes the patched app believe it's talking to real GMS.
      */
     private static void hookPackageManagerGetPackageInfo(Context context) {
         try {
+            // Hook getPackageInfo(String, int)
             XposedHelpers.findAndHookMethod(
                     context.getPackageManager().getClass(),
                     "getPackageInfo",
@@ -159,26 +241,28 @@ public class GmsRedirector {
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            String pkgName = (String) param.args[0];
-                            int flags = (int) param.args[1];
-                            PackageInfo pi = (PackageInfo) param.getResult();
-
-                            if (pi != null && NPATCH_GMS.equals(pkgName) &&
-                                    (flags & PackageManager.GET_SIGNATURES) != 0) {
-                                // Make NPatch GMS look like real GMS to the patched app
-                                if (originalSignature != null && !originalSignature.isEmpty()) {
-                                    try {
-                                        byte[] sigBytes = android.util.Base64.decode(originalSignature,
-                                                android.util.Base64.DEFAULT);
-                                        pi.signatures = new Signature[]{new Signature(sigBytes)};
-                                    } catch (Throwable ignored) {}
-                                }
-                            }
+                            spoofGmsSignature((PackageInfo) param.getResult(), (int) param.args[1]);
                         }
                     }
             );
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook PackageManager.getPackageInfo", t);
         }
+    }
+
+    private static void spoofGmsSignature(PackageInfo pi, int flags) {
+        if (pi == null || targetGms == null) return;
+        // Make MicroG look like real GMS
+        if (targetGms.equals(pi.packageName) && (flags & PackageManager.GET_SIGNATURES) != 0) {
+            if (originalSignature != null && !originalSignature.isEmpty()) {
+                try {
+                    byte[] sigBytes = android.util.Base64.decode(originalSignature,
+                            android.util.Base64.DEFAULT);
+                    pi.signatures = new Signature[]{new Signature(sigBytes)};
+                } catch (Throwable ignored) {}
+            }
+        }
+        // Also spoof the calling app's own package to appear as original
+        // (for when MicroG asks "who's calling me?" via getCallingPackage)
     }
 }

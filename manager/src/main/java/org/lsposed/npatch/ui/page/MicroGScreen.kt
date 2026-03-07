@@ -2,6 +2,7 @@ package org.lsposed.npatch.ui.page
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -34,16 +35,24 @@ fun MicroGScreen() {
     val context = LocalContext.current
 
     var isInstalled by remember { mutableStateOf(false) }
+    var installedPackage by remember { mutableStateOf<String?>(null) }
     var accountName by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        isInstalled = try {
-            context.packageManager.getPackageInfo(Constants.NPATCH_GMS_PACKAGE_NAME, 0)
-            true
-        } catch (e: PackageManager.NameNotFoundException) {
-            false
-        }
+    val gmsPackages = listOf(
+        Constants.NPATCH_GMS_PACKAGE_NAME,
+        "app.revanced.android.gms",
+        "org.microg.gms"
+    )
 
+    LaunchedEffect(Unit) {
+        for (pkg in gmsPackages) {
+            try {
+                context.packageManager.getPackageInfo(pkg, 0)
+                isInstalled = true
+                installedPackage = pkg
+                break
+            } catch (_: PackageManager.NameNotFoundException) {}
+        }
         if (isInstalled) {
             accountName = getSignedInAccount(context)
         }
@@ -99,10 +108,16 @@ fun MicroGScreen() {
                         )
                         Spacer(Modifier.height(12.dp))
                         Button(onClick = {
-                            // TODO: Install NPatch GMS from bundled assets
-                            Log.i(TAG, "Install NPatch GMS requested")
+                            // Open ReVanced GmsCore download page
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/ReVanced/GmsCore/releases/latest"))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to open download page", e)
+                            }
                         }) {
-                            Text(stringResource(R.string.microg_install))
+                            Text(stringResource(R.string.microg_download_revanced))
                         }
                     }
                 }
@@ -139,7 +154,7 @@ fun MicroGScreen() {
                                 try {
                                     val intent = Intent().apply {
                                         setClassName(
-                                            Constants.NPATCH_GMS_PACKAGE_NAME,
+                                            installedPackage!!,
                                             "org.microg.gms.ui.AccountSettingsActivity"
                                         )
                                     }
@@ -165,7 +180,7 @@ fun MicroGScreen() {
                                 try {
                                     val intent = Intent().apply {
                                         setClassName(
-                                            Constants.NPATCH_GMS_PACKAGE_NAME,
+                                            installedPackage!!,
                                             "org.microg.gms.auth.login.LoginActivity"
                                         )
                                     }

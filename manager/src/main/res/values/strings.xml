@@ -115,7 +115,9 @@
     <string name="microg_account_not_signed_in">Not signed in</string>
     <string name="microg_sign_in">Sign in with Google</string>
     <string name="microg_sign_out">Sign out</string>
-    <string name="microg_description">NPatch GMS provides Google services for patched Google apps without relying on real Google Play Services.</string>
+    <string name="microg_description">NPatch GMS provides Google services for patched Google apps without relying on real Google Play Services.\n\nSupported: NPatch GMS, ReVanced GmsCore, or MicroG.</string>
+    <string name="microg_installed_package">Using: %1$s</string>
+    <string name="microg_download_revanced">Download ReVanced GmsCore</string>
 
     <!-- Foreground Service -->
     <string name="settings_keep_alive">Keep alive notification</string>
