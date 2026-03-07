@@ -468,44 +468,45 @@ public class NPatch {
     }
 
     /**
-     * Create a copy of the source APK with GMS package name replaced globally.
-     * Since com.google.android.gms (22 chars) = org.lsposed.npatch.gms (22 chars),
-     * raw byte replacement is safe - no structure changes needed.
-     * This replaces in DEX files, resources.arsc, and binary manifest.
+     * Create a copy of the source APK with GMS references replaced in DEX files.
+     * Uses java.util.zip to properly handle CRC and compression.
      */
     private File patchDexInApk(File srcApk, File outputDir) throws PatchError, IOException {
         File patchedSrc = new File(outputDir, "gms_patched_" + srcApk.getName());
         patchedSrc.delete();
 
-        // Read entire APK into memory
-        byte[] apkBytes;
-        try (var fis = new FileInputStream(srcApk)) {
-            apkBytes = fis.readAllBytes();
-        }
+        try (var zin = new java.util.zip.ZipFile(srcApk);
+             var zout = new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(patchedSrc))) {
+            var entries = zin.entries();
+            while (entries.hasMoreElements()) {
+                var entry = entries.nextElement();
+                byte[] data;
+                try (var is = zin.getInputStream(entry)) {
+                    data = is.readAllBytes();
+                }
 
-        // Replace all occurrences of the GMS package name (same length = safe)
-        byte[] search = Constants.REAL_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
-        byte[] replace = Constants.NPATCH_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
+                // Patch DEX files
+                if (entry.getName().startsWith("classes") && entry.getName().endsWith(".dex")) {
+                    data = DexGmsRedirect.patchDex(data, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
+                }
 
-        int count = 0;
-        for (int i = 0; i <= apkBytes.length - search.length; i++) {
-            boolean match = true;
-            for (int j = 0; j < search.length; j++) {
-                if (apkBytes[i + j] != search[j]) { match = false; break; }
+                // Create new entry preserving compression method
+                var newEntry = new java.util.zip.ZipEntry(entry.getName());
+                if (entry.getMethod() == java.util.zip.ZipEntry.STORED) {
+                    newEntry.setMethod(java.util.zip.ZipEntry.STORED);
+                    newEntry.setSize(data.length);
+                    newEntry.setCompressedSize(data.length);
+                    var crc = new java.util.zip.CRC32();
+                    crc.update(data);
+                    newEntry.setCrc(crc.getValue());
+                } else {
+                    newEntry.setMethod(java.util.zip.ZipEntry.DEFLATED);
+                }
+                zout.putNextEntry(newEntry);
+                zout.write(data);
+                zout.closeEntry();
             }
-            if (match) {
-                System.arraycopy(replace, 0, apkBytes, i, replace.length);
-                count++;
-                i += replace.length - 1; // skip past replacement
-            }
         }
-        logger.i("Replaced " + count + " GMS package references in APK");
-
-        // Write modified APK
-        try (var fos = new java.io.FileOutputStream(patchedSrc)) {
-            fos.write(apkBytes);
-        }
-
         logger.i("Pre-patched source APK for GMS redirect: " + patchedSrc);
         return patchedSrc;
     }
