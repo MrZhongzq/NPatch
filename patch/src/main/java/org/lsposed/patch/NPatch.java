@@ -244,8 +244,13 @@ public class NPatch {
         logger.i("Parsing original apk...");
 
         // If GMS redirect is enabled, pre-patch the source APK's DEX files
+        // Extract original signature BEFORE patching (patched APK loses signing block)
+        String preExtractedSignature = null;
         File actualSrcApk = srcApkFile;
         if (useNPatchGms) {
+            if (sigbypassLevel > 0) {
+                preExtractedSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+            }
             logger.i("Patching DEX files for GMS redirect...");
             actualSrcApk = patchDexInApk(srcApkFile, outputFile.getParentFile());
         }
@@ -284,7 +289,8 @@ public class NPatch {
 
             String originalSignature = null;
             if (sigbypassLevel > 0) {
-                originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+                originalSignature = preExtractedSignature != null ? preExtractedSignature
+                        : ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                 if (originalSignature == null || originalSignature.isEmpty()) {
                     throw new PatchError("get original signature failed");
                 }
