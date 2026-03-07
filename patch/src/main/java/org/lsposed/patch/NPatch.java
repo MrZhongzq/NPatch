@@ -243,12 +243,19 @@ public class NPatch {
 
         logger.i("Parsing original apk...");
 
+        // If GMS redirect is enabled, pre-patch the source APK's DEX files
+        File actualSrcApk = srcApkFile;
+        if (useNPatchGms) {
+            logger.i("Patching DEX files for GMS redirect...");
+            actualSrcApk = patchDexInApk(srcApkFile, outputFile.getParentFile());
+        }
+
         boolean embedOriginal = sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
 
         try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
              ZFile srcZFile = embedOriginal
-                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, srcApkFile, false)
-                     : ZFile.openReadOnly(srcApkFile)) {
+                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, actualSrcApk, false)
+                     : ZFile.openReadOnly(actualSrcApk)) {
 
             // sign apk
             try {
@@ -452,6 +459,44 @@ public class NPatch {
             logger.i("Writing apk...");
         }
         logger.i("Done. Output APK: " + outputFile.getAbsolutePath());
+    }
+
+    /**
+     * Create a copy of the source APK with GMS references replaced in DEX files.
+     * This must be done BEFORE embedding since the origin APK is loaded at runtime.
+     */
+    private File patchDexInApk(File srcApk, File outputDir) throws PatchError, IOException {
+        File patchedSrc = new File(outputDir, "gms_patched_" + srcApk.getName());
+        patchedSrc.delete();
+
+        try (ZFile dst = ZFile.openReadWrite(patchedSrc, Z_FILE_OPTIONS);
+             ZFile src = ZFile.openReadOnly(srcApk)) {
+            int totalReplaced = 0;
+            for (StoredEntry entry : src.entries()) {
+                String name = entry.getCentralDirectoryHeader().getName();
+                boolean isStored = entry.getCentralDirectoryHeader()
+                        .getCompressionInfoWithWait().getMethod()
+                        == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+
+                if (name.startsWith("classes") && name.endsWith(".dex")) {
+                    // Patch DEX files
+                    byte[] dexBytes = DexGmsRedirect.readStream(entry.open());
+                    int before = dexBytes.length;
+                    dexBytes = DexGmsRedirect.patchDex(dexBytes, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
+                    dst.add(name, new java.io.ByteArrayInputStream(dexBytes));
+                } else {
+                    // Copy other entries as-is
+                    if (isStored || name.endsWith(".so") || name.equals("resources.arsc")) {
+                        dst.add(name, entry.open(), false);
+                    } else {
+                        dst.add(name, entry.open());
+                    }
+                }
+            }
+            dst.realign();
+        }
+        logger.i("Pre-patched source APK for GMS redirect: " + patchedSrc);
+        return patchedSrc;
     }
 
     private void embedModules(ZFile zFile) {
