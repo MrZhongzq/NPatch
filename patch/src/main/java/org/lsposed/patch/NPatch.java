@@ -469,37 +469,31 @@ public class NPatch {
 
     /**
      * Create a copy of the source APK with GMS references replaced in DEX files.
-     * This must be done BEFORE embedding since the origin APK is loaded at runtime.
+     * Uses in-place byte replacement on DEX entries within the ZIP to avoid
+     * repackaging corruption.
      */
     private File patchDexInApk(File srcApk, File outputDir) throws PatchError, IOException {
         File patchedSrc = new File(outputDir, "gms_patched_" + srcApk.getName());
         patchedSrc.delete();
 
-        try (ZFile dst = ZFile.openReadWrite(patchedSrc, Z_FILE_OPTIONS);
-             ZFile src = ZFile.openReadOnly(srcApk)) {
-            int totalReplaced = 0;
-            for (StoredEntry entry : src.entries()) {
-                String name = entry.getCentralDirectoryHeader().getName();
-                boolean isStored = entry.getCentralDirectoryHeader()
-                        .getCompressionInfoWithWait().getMethod()
-                        == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+        // Copy the original APK byte-for-byte first (preserves signing block)
+        try (var in_ = new FileInputStream(srcApk);
+             var out_ = new java.io.FileOutputStream(patchedSrc)) {
+            in_.transferTo(out_);
+        }
 
+        // Open the copy and replace DEX entries with patched versions
+        try (ZFile zf = ZFile.openReadWrite(patchedSrc, Z_FILE_OPTIONS)) {
+            for (StoredEntry entry : new java.util.ArrayList<>(zf.entries())) {
+                String name = entry.getCentralDirectoryHeader().getName();
                 if (name.startsWith("classes") && name.endsWith(".dex")) {
-                    // Patch DEX files
                     byte[] dexBytes = DexGmsRedirect.readStream(entry.open());
-                    int before = dexBytes.length;
                     dexBytes = DexGmsRedirect.patchDex(dexBytes, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
-                    dst.add(name, new java.io.ByteArrayInputStream(dexBytes));
-                } else {
-                    // Copy other entries as-is
-                    if (isStored || name.endsWith(".so") || name.equals("resources.arsc")) {
-                        dst.add(name, entry.open(), false);
-                    } else {
-                        dst.add(name, entry.open());
-                    }
+                    // Remove old entry and add patched one
+                    entry.delete();
+                    zf.add(name, new java.io.ByteArrayInputStream(dexBytes));
                 }
             }
-            dst.realign();
         }
         logger.i("Pre-patched source APK for GMS redirect: " + patchedSrc);
         return patchedSrc;
