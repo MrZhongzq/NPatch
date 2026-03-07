@@ -468,33 +468,44 @@ public class NPatch {
     }
 
     /**
-     * Create a copy of the source APK with GMS references replaced in DEX files.
-     * Uses in-place byte replacement on DEX entries within the ZIP to avoid
-     * repackaging corruption.
+     * Create a copy of the source APK with GMS package name replaced globally.
+     * Since com.google.android.gms (22 chars) = org.lsposed.npatch.gms (22 chars),
+     * raw byte replacement is safe - no structure changes needed.
+     * This replaces in DEX files, resources.arsc, and binary manifest.
      */
     private File patchDexInApk(File srcApk, File outputDir) throws PatchError, IOException {
         File patchedSrc = new File(outputDir, "gms_patched_" + srcApk.getName());
         patchedSrc.delete();
 
-        // Copy the original APK byte-for-byte first (preserves signing block)
-        try (var in_ = new FileInputStream(srcApk);
-             var out_ = new java.io.FileOutputStream(patchedSrc)) {
-            in_.transferTo(out_);
+        // Read entire APK into memory
+        byte[] apkBytes;
+        try (var fis = new FileInputStream(srcApk)) {
+            apkBytes = fis.readAllBytes();
         }
 
-        // Open the copy and replace DEX entries with patched versions
-        try (ZFile zf = ZFile.openReadWrite(patchedSrc, Z_FILE_OPTIONS)) {
-            for (StoredEntry entry : new java.util.ArrayList<>(zf.entries())) {
-                String name = entry.getCentralDirectoryHeader().getName();
-                if (name.startsWith("classes") && name.endsWith(".dex")) {
-                    byte[] dexBytes = DexGmsRedirect.readStream(entry.open());
-                    dexBytes = DexGmsRedirect.patchDex(dexBytes, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
-                    // Remove old entry and add patched one
-                    entry.delete();
-                    zf.add(name, new java.io.ByteArrayInputStream(dexBytes));
-                }
+        // Replace all occurrences of the GMS package name (same length = safe)
+        byte[] search = Constants.REAL_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
+        byte[] replace = Constants.NPATCH_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
+
+        int count = 0;
+        for (int i = 0; i <= apkBytes.length - search.length; i++) {
+            boolean match = true;
+            for (int j = 0; j < search.length; j++) {
+                if (apkBytes[i + j] != search[j]) { match = false; break; }
+            }
+            if (match) {
+                System.arraycopy(replace, 0, apkBytes, i, replace.length);
+                count++;
+                i += replace.length - 1; // skip past replacement
             }
         }
+        logger.i("Replaced " + count + " GMS package references in APK");
+
+        // Write modified APK
+        try (var fos = new java.io.FileOutputStream(patchedSrc)) {
+            fos.write(apkBytes);
+        }
+
         logger.i("Pre-patched source APK for GMS redirect: " + patchedSrc);
         return patchedSrc;
     }
