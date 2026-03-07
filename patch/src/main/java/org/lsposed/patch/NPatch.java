@@ -490,9 +490,14 @@ public class NPatch {
                     data = DexGmsRedirect.patchDex(data, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
                 }
 
-                // Create new entry preserving compression method
-                var newEntry = new java.util.zip.ZipEntry(entry.getName());
-                if (entry.getMethod() == java.util.zip.ZipEntry.STORED) {
+                // Determine if entry must be stored uncompressed
+                String ename = entry.getName();
+                boolean mustStore = entry.getMethod() == java.util.zip.ZipEntry.STORED
+                        || ename.endsWith(".so")
+                        || ename.equals("resources.arsc");
+
+                var newEntry = new java.util.zip.ZipEntry(ename);
+                if (mustStore) {
                     newEntry.setMethod(java.util.zip.ZipEntry.STORED);
                     newEntry.setSize(data.length);
                     newEntry.setCompressedSize(data.length);
