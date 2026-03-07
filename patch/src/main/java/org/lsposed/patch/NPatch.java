@@ -489,8 +489,6 @@ public class NPatch {
         property.addApplicationAttribute(new AttributeItem("isSplitRequired", false));
         property.addManifestAttribute(new AttributeItem("isSplitRequired", false));
         property.addManifestAttribute(new AttributeItem("requiredSplitTypes", ""));
-        property.addDeleteMetaData("com.android.vending.splits.required");
-        property.addDeleteMetaData("com.android.vending.splits");
         if (!targetPackage.equals(originPackage)) {
             property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.PACKAGE, targetPackage).setNamespace(null));
         }
