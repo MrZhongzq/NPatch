@@ -243,24 +243,12 @@ public class NPatch {
 
         logger.i("Parsing original apk...");
 
-        // If GMS redirect is enabled, pre-patch the source APK's DEX files
-        // Extract original signature BEFORE patching (patched APK loses signing block)
-        String preExtractedSignature = null;
-        File actualSrcApk = srcApkFile;
-        if (useNPatchGms) {
-            if (sigbypassLevel > 0) {
-                preExtractedSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
-            }
-            logger.i("Patching DEX files for GMS redirect...");
-            actualSrcApk = patchDexInApk(srcApkFile, outputFile.getParentFile());
-        }
-
         boolean embedOriginal = sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
 
         try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
              ZFile srcZFile = embedOriginal
-                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, actualSrcApk, false)
-                     : ZFile.openReadOnly(actualSrcApk)) {
+                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, srcApkFile, false)
+                     : ZFile.openReadOnly(srcApkFile)) {
 
             // sign apk
             try {
@@ -289,8 +277,7 @@ public class NPatch {
 
             String originalSignature = null;
             if (sigbypassLevel > 0) {
-                originalSignature = preExtractedSignature != null ? preExtractedSignature
-                        : ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+                originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                 if (originalSignature == null || originalSignature.isEmpty()) {
                     throw new PatchError("get original signature failed");
                 }
@@ -465,141 +452,6 @@ public class NPatch {
             logger.i("Writing apk...");
         }
         logger.i("Done. Output APK: " + outputFile.getAbsolutePath());
-    }
-
-    /**
-     * Create a copy of the source APK with GMS references replaced in STORED DEX files.
-     * Uses direct byte modification to preserve ZIP alignment, compression, and structure.
-     * Only modifies STORED (uncompressed) DEX entries in-place.
-     */
-    private File patchDexInApk(File srcApk, File outputDir) throws PatchError, IOException {
-        File patchedSrc = new File(outputDir, "gms_patched_" + srcApk.getName());
-        patchedSrc.delete();
-
-        // Byte-for-byte copy preserving everything
-        byte[] apkBytes;
-        try (var fis = new FileInputStream(srcApk)) {
-            apkBytes = fis.readAllBytes();
-        }
-
-        // Find and patch STORED DEX entries using ZIP local file headers
-        byte[] search = Constants.REAL_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
-        byte[] replace = Constants.NPATCH_GMS_PACKAGE_NAME.getBytes(StandardCharsets.UTF_8);
-
-        try (var zf = new java.util.zip.ZipFile(srcApk)) {
-            var entries = zf.entries();
-            while (entries.hasMoreElements()) {
-                var entry = entries.nextElement();
-                if (!entry.getName().startsWith("classes") || !entry.getName().endsWith(".dex")) continue;
-                if (entry.getMethod() != java.util.zip.ZipEntry.STORED) {
-                    logger.i("DEX " + entry.getName() + " is compressed, skipping in-place patch");
-                    continue;
-                }
-
-                // Find the data offset: local header (30) + filename length + extra length
-                // We need to scan for the local file header
-                long dataOffset = findLocalFileDataOffset(apkBytes, entry.getName());
-                if (dataOffset < 0) {
-                    logger.e("Could not find data offset for " + entry.getName());
-                    continue;
-                }
-
-                // Replace GMS strings within the DEX data region
-                int count = 0;
-                long end = dataOffset + entry.getSize();
-                for (long i = dataOffset; i <= end - search.length; i++) {
-                    boolean match = true;
-                    for (int j = 0; j < search.length; j++) {
-                        if (apkBytes[(int)(i + j)] != search[j]) { match = false; break; }
-                    }
-                    if (match) {
-                        System.arraycopy(replace, 0, apkBytes, (int)i, replace.length);
-                        count++;
-                    }
-                }
-                if (count > 0) {
-                    logger.i("Replaced " + count + " GMS references in " + entry.getName());
-                    // Fix DEX checksums within the data
-                    DexGmsRedirect.fixDexChecksumsAt(apkBytes, (int)dataOffset, (int)entry.getSize());
-                    // Fix ZIP CRC32 in the local file header
-                    fixZipEntryCrc(apkBytes, entry.getName(), (int)dataOffset, (int)entry.getSize());
-                }
-            }
-        }
-
-        try (var fos = new java.io.FileOutputStream(patchedSrc)) {
-            fos.write(apkBytes);
-        }
-        logger.i("Pre-patched source APK for GMS redirect: " + patchedSrc);
-        return patchedSrc;
-    }
-
-    /** Find the offset of file data for a named entry in a ZIP byte array */
-    private long findLocalFileDataOffset(byte[] zip, String name) {
-        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
-        // Search for local file header signature + name
-        for (int i = 0; i < zip.length - 30 - nameBytes.length; i++) {
-            // Local file header signature: 0x04034b50
-            if (zip[i] == 0x50 && zip[i+1] == 0x4b && zip[i+2] == 0x03 && zip[i+3] == 0x04) {
-                int fnLen = (zip[i+26] & 0xFF) | ((zip[i+27] & 0xFF) << 8);
-                int exLen = (zip[i+28] & 0xFF) | ((zip[i+29] & 0xFF) << 8);
-                if (fnLen == nameBytes.length) {
-                    boolean match = true;
-                    for (int j = 0; j < nameBytes.length; j++) {
-                        if (zip[i + 30 + j] != nameBytes[j]) { match = false; break; }
-                    }
-                    if (match) return i + 30 + fnLen + exLen;
-                }
-            }
-        }
-        return -1;
-    }
-
-    /** Fix the CRC32 in both local file header and central directory for a ZIP entry */
-    private void fixZipEntryCrc(byte[] zip, String name, int dataOffset, int dataSize) {
-        var crc = new java.util.zip.CRC32();
-        crc.update(zip, dataOffset, dataSize);
-        int crcVal = (int) crc.getValue();
-
-        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
-        // Fix local file header CRC (at offset 14 from header start)
-        for (int i = 0; i < zip.length - 30 - nameBytes.length; i++) {
-            if (zip[i] == 0x50 && zip[i+1] == 0x4b && zip[i+2] == 0x03 && zip[i+3] == 0x04) {
-                int fnLen = (zip[i+26] & 0xFF) | ((zip[i+27] & 0xFF) << 8);
-                if (fnLen == nameBytes.length) {
-                    boolean match = true;
-                    for (int j = 0; j < nameBytes.length; j++) {
-                        if (zip[i + 30 + j] != nameBytes[j]) { match = false; break; }
-                    }
-                    if (match) {
-                        zip[i+14] = (byte)(crcVal & 0xFF);
-                        zip[i+15] = (byte)((crcVal >> 8) & 0xFF);
-                        zip[i+16] = (byte)((crcVal >> 16) & 0xFF);
-                        zip[i+17] = (byte)((crcVal >> 24) & 0xFF);
-                        break;
-                    }
-                }
-            }
-        }
-        // Fix central directory CRC (at offset 16 from CD header start)
-        for (int i = 0; i < zip.length - 46 - nameBytes.length; i++) {
-            if (zip[i] == 0x50 && zip[i+1] == 0x4b && zip[i+2] == 0x01 && zip[i+3] == 0x02) {
-                int fnLen = (zip[i+28] & 0xFF) | ((zip[i+29] & 0xFF) << 8);
-                if (fnLen == nameBytes.length) {
-                    boolean match = true;
-                    for (int j = 0; j < nameBytes.length; j++) {
-                        if (zip[i + 46 + j] != nameBytes[j]) { match = false; break; }
-                    }
-                    if (match) {
-                        zip[i+16] = (byte)(crcVal & 0xFF);
-                        zip[i+17] = (byte)((crcVal >> 8) & 0xFF);
-                        zip[i+18] = (byte)((crcVal >> 16) & 0xFF);
-                        zip[i+19] = (byte)((crcVal >> 24) & 0xFF);
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     private void embedModules(ZFile zFile) {

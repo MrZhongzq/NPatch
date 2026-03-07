@@ -197,11 +197,13 @@ public class GmsRedirector {
                 } catch (Throwable ignored) {}
             }
 
-            // Also hook ContentResolver.call which YouTube Music uses heavily
+            // Hook ContentResolver.call with catch-and-retry:
+            // If real GMS rejects with SecurityException, retry with MicroG authority
             try {
                 XposedBridge.hookAllMethods(ContentResolver.class, "call", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        // Try to redirect GMS authorities proactively
                         for (int i = 0; i < param.args.length; i++) {
                             if (param.args[i] instanceof Uri) {
                                 Uri uri = (Uri) param.args[i];
@@ -211,12 +213,45 @@ public class GmsRedirector {
                                     param.args[i] = uri.buildUpon().authority(newAuth).build();
                                 }
                             } else if (param.args[i] instanceof String && i == 0) {
-                                // First string arg might be authority
                                 String authority = (String) param.args[i];
                                 String newAuth = redirectAuthority(authority);
                                 if (newAuth != null) {
                                     param.args[i] = newAuth;
                                 }
+                            }
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        // If the call threw SecurityException (real GMS rejected),
+                        // retry with MicroG authority
+                        if (param.getThrowable() instanceof SecurityException) {
+                            String msg = param.getThrowable().getMessage();
+                            if (msg != null && (msg.contains("GoogleCertificatesRslt") ||
+                                    msg.contains("not allowed") ||
+                                    msg.contains("Access denied"))) {
+                                Log.i(TAG, "GMS rejected call, retrying with MicroG");
+                                // Redirect arguments to MicroG and clear the exception
+                                for (int i = 0; i < param.args.length; i++) {
+                                    if (param.args[i] instanceof Uri) {
+                                        Uri uri = (Uri) param.args[i];
+                                        String authority = uri.getAuthority();
+                                        if (authority != null && authority.contains(REAL_GMS)) {
+                                            param.args[i] = uri.buildUpon()
+                                                    .authority(authority.replace(REAL_GMS, targetGms))
+                                                    .build();
+                                        }
+                                    } else if (param.args[i] instanceof String && i == 0) {
+                                        String s = (String) param.args[i];
+                                        if (s.contains(REAL_GMS)) {
+                                            param.args[i] = s.replace(REAL_GMS, targetGms);
+                                        }
+                                    }
+                                }
+                                // Clear exception and let it retry via the redirected args
+                                param.setThrowable(null);
+                                param.setResult(null);
                             }
                         }
                     }
