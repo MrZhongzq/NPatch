@@ -203,9 +203,18 @@ fun MicroGScreen() {
 
 private fun getSignedInAccount(context: android.content.Context): String? {
     return try {
-        val accounts = android.accounts.AccountManager.get(context)
-            .getAccountsByType("com.google")
-        if (accounts.isNotEmpty()) accounts[0].name else null
+        val am = android.accounts.AccountManager.get(context)
+        // Check multiple account types - MicroG variants use different types
+        val accountTypes = listOf(
+            "app.revanced",    // ReVanced GmsCore
+            "org.microg",      // Original MicroG
+            "com.google"       // Real GMS or NPatch GMS
+        )
+        for (type in accountTypes) {
+            val accounts = am.getAccountsByType(type)
+            if (accounts.isNotEmpty()) return accounts[0].name
+        }
+        null
     } catch (e: Exception) {
         Log.w(TAG, "Failed to query accounts", e)
         null

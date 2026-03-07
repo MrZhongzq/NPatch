@@ -338,7 +338,7 @@ public class NPatch {
             final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource, useNPatchGms);
             final var configBytes = new Gson().toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
-            try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage))) {
+            try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
                 dstZFile.add(ANDROID_MANIFEST_XML, is);
             } catch (Throwable e) {
                 throw new PatchError("Error when modifying manifest", e);
@@ -470,7 +470,7 @@ public class NPatch {
         }
     }
 
-    private byte[] modifyManifestFile(InputStream is, String metadata, int minSdkVersion, String originPackage, String newPackage) throws IOException {
+    private byte[] modifyManifestFile(InputStream is, String metadata, int minSdkVersion, String originPackage, String newPackage, String originalSignature) throws IOException {
         ModificationProperty property = new ModificationProperty();
 
         String targetPackage = (newPackage != null && !newPackage.isEmpty()) ? newPackage : originPackage;
@@ -506,6 +506,25 @@ public class NPatch {
         });
 
         property.addMetaData(new ModificationProperty.MetaData("npatch", metadata));
+
+        // Add fake-signature metadata for MicroG/ReVanced GmsCore compatibility
+        // This allows MicroG to recognize the patched app as the original
+        if (useNPatchGms && originalSignature != null && !originalSignature.isEmpty()) {
+            // Convert the base64 signature to hex format that MicroG expects
+            try {
+                byte[] sigBytes = Base64.getDecoder().decode(originalSignature);
+                StringBuilder hex = new StringBuilder();
+                for (byte b : sigBytes) {
+                    hex.append(String.format("%02x", b));
+                }
+                property.addMetaData(new ModificationProperty.MetaData("fake-signature", hex.toString()));
+                property.addUsesPermission("android.permission.FAKE_PACKAGE_SIGNATURE");
+                logger.d("Added fake-signature metadata for MicroG compatibility");
+            } catch (Exception e) {
+                logger.e("Failed to add fake-signature: " + e.getMessage());
+            }
+        }
+
         // TODO: replace query_all with queries -> manager
         if (useManager)
             property.addUsesPermission("android.permission.QUERY_ALL_PACKAGES");
