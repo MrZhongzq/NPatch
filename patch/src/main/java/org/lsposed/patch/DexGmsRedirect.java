@@ -107,6 +107,27 @@ public class DexGmsRedirect {
     }
 
     /**
+     * Fix DEX checksums at a specific offset within a larger byte array (e.g., inside a ZIP).
+     */
+    public static void fixDexChecksumsAt(byte[] data, int offset, int length) {
+        try {
+            // SHA-1 signature covers bytes from dex_offset+32 to dex_offset+length
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            md.update(data, offset + 32, length - 32);
+            byte[] sha1 = md.digest();
+            System.arraycopy(sha1, 0, data, offset + 12, 20);
+
+            // Adler32 checksum covers bytes from dex_offset+12 to dex_offset+length
+            Adler32 adler = new Adler32();
+            adler.update(data, offset + 12, length - 12);
+            long checksum = adler.getValue();
+            ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            buf.putInt((int) checksum);
+            System.arraycopy(buf.array(), 0, data, offset + 8, 4);
+        } catch (Exception ignored) {}
+    }
+
+    /**
      * Recalculate DEX file SHA-1 signature (offset 12, 20 bytes)
      * and Adler32 checksum (offset 8, 4 bytes).
      */
