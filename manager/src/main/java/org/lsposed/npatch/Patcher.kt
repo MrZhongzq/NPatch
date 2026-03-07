@@ -39,6 +39,7 @@ object Patcher {
                 if (config.installerSource != null && config.installerSource.isNotEmpty()) {
                     add("--installerSource"); add(config.installerSource)
                 }
+                if (config.useNPatchGms) add("--useNPatchGms")
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
                 }

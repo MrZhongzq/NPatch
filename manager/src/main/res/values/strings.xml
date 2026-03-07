@@ -105,6 +105,18 @@
     <string name="settings_storage_directory">change storage directory</string>
     <string name="settings_detail_patch_logs">Detail patch logs</string>
     
+    <!-- NPatch GMS (MicroG) -->
+    <string name="patch_use_npatch_gms">Use NPatch GMS</string>
+    <string name="patch_use_npatch_gms_desc">Redirect Google Play Services calls to NPatch built-in MicroG. Enable this for Google apps (YouTube, YouTube Music, etc.) to bypass certificate verification.</string>
+    <string name="screen_microg">MicroG</string>
+    <string name="microg_not_installed">NPatch GMS is not installed</string>
+    <string name="microg_install">Install NPatch GMS</string>
+    <string name="microg_account_signed_in">Signed in as %1$s</string>
+    <string name="microg_account_not_signed_in">Not signed in</string>
+    <string name="microg_sign_in">Sign in with Google</string>
+    <string name="microg_sign_out">Sign out</string>
+    <string name="microg_description">NPatch GMS provides Google services for patched Google apps without relying on real Google Play Services.</string>
+
     <!-- Foreground Service -->
     <string name="settings_keep_alive">Keep alive notification</string>
     <string name="settings_keep_alive_desc">Show a persistent notification to prevent being killed by the system</string>

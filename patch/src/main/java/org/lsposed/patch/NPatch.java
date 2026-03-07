@@ -107,6 +107,9 @@ public class NPatch {
     @Parameter(names = {"--installerSource"}, description = "Original app installer source (e.g. Google Play, Samsung Galaxy Store)")
     private String installerSource = "";
 
+    @Parameter(names = {"--useNPatchGms"}, description = "Redirect GMS calls to NPatch built-in MicroG")
+    private boolean useNPatchGms = false;
+
     @Parameter(names = {"-m", "--embed"}, description = "Embed provided modules to apk")
     private List<String> modules = new ArrayList<>();
 
@@ -332,7 +335,7 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource);
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource, useNPatchGms);
             final var configBytes = new Gson().toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage))) {

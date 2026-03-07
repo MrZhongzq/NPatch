@@ -14,6 +14,7 @@ public class PatchConfig {
     public final String managerPackageName;
     public final String newPackage;
     public final String installerSource;
+    public final boolean useNPatchGms;
 
     public PatchConfig(
             boolean useManager,
@@ -25,7 +26,8 @@ public class PatchConfig {
             boolean injectProvider,
             boolean outputLog,
             String newPackage,
-            String installerSource
+            String installerSource,
+            boolean useNPatchGms
     ) {
         this.useManager = useManager;
         this.debuggable = debuggable;
@@ -39,5 +41,6 @@ public class PatchConfig {
         this.newPackage = newPackage;
         this.outputLog = outputLog;
         this.installerSource = installerSource;
+        this.useNPatchGms = useNPatchGms;
     }
 }

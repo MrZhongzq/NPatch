@@ -145,6 +145,12 @@ public class LSPApplication {
         switchAllClassLoader();
         SigBypass.doSigBypass(context, config.sigBypassLevel);
 
+        // Activate GMS redirect if enabled (for Google apps with MicroG)
+        if (config.useNPatchGms) {
+            Log.i(TAG, "Activating NPatch GMS redirect");
+            GmsRedirector.activate(context, config.originalSignature);
+        }
+
         Log.i(TAG, "NPatch bootstrap completed");
     }
 

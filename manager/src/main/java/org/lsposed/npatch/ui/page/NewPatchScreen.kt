@@ -378,6 +378,13 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             title = stringResource(R.string.patch_output_log_to_media),
             desc = stringResource(R.string.patch_output_log_to_media_desc)
         )
+        SettingsCheckBox(
+            modifier = Modifier.clickable { viewModel.useNPatchGms = !viewModel.useNPatchGms },
+            checked = viewModel.useNPatchGms,
+            icon = Icons.Outlined.CloudSync,
+            title = stringResource(R.string.patch_use_npatch_gms),
+            desc = stringResource(R.string.patch_use_npatch_gms_desc)
+        )
         var bypassExpanded by remember { mutableStateOf(false) }
         AnywhereDropdown(
             expanded = bypassExpanded,

@@ -19,5 +19,6 @@ enum class BottomBarDestination(
     Manage(ManageScreenDestination, R.string.screen_manage, Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
     Repo(RepoScreenDestination, R.string.screen_repo, Icons.Filled.GetApp, Icons.Outlined.GetApp),
     Logs(LogsScreenDestination, R.string.screen_logs, Icons.Filled.Assignment, Icons.Outlined.Assignment),
+    MicroG(MicroGScreenDestination, R.string.screen_microg, Icons.Filled.Cloud, Icons.Outlined.Cloud),
     Settings(SettingsScreenDestination, R.string.screen_settings, Icons.Filled.Settings, Icons.Outlined.Settings);
 }

@@ -48,6 +48,7 @@ class NewPatchViewModel : ViewModel() {
     var injectDex by mutableStateOf(false)
     var injectProvider by mutableStateOf(false)
     var outputLog by mutableStateOf(true)
+    var useNPatchGms by mutableStateOf(false)
     var embeddedModules = emptyList<AppInfo>()
 
     lateinit var patchApp: AppInfo
@@ -101,7 +102,7 @@ class NewPatchViewModel : ViewModel() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
         val installerSource = getInstallerSource(patchApp.app.packageName)
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, outputLog, newPackageName, installerSource)
+        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, outputLog, newPackageName, installerSource, useNPatchGms)
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,
