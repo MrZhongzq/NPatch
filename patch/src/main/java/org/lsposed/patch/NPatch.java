@@ -168,74 +168,68 @@ public class NPatch {
         //noinspection ResultOfMethodCallIgnored
         outputDir.mkdirs();
 
-        // If multiple APKs (split APK), merge them into one before patching
-        // Extract original signature from base APK BEFORE merging (merge invalidates signing block)
-        File originalBaseApk = new File(apkPaths.get(0)).getAbsoluteFile();
-        String preExtractedSignature = null;
-        if (apkPaths.size() > 1 && sigbypassLevel > 0) {
-            preExtractedSignature = ApkSignatureHelper.getApkSignInfo(originalBaseApk.getAbsolutePath());
+        boolean isFirst = true;
+        for (var apk : apkPaths) {
+            File srcApkFile = new File(apk).getAbsoluteFile();
+            String apkFileName = srcApkFile.getName();
+
+            File outputFile = new File(outputDir, String.format(
+                    Locale.getDefault(), "%s-%d-npatched.apk",
+                    FilenameUtils.getBaseName(apkFileName),
+                    LSPConfig.instance.VERSION_CODE)
+            ).getAbsoluteFile();
+
+            if (outputFile.exists() && !forceOverwrite)
+                throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
+
+            if (isFirst) {
+                logger.i("Processing " + srcApkFile + " -> " + outputFile);
+                patch(srcApkFile, outputFile);
+                isFirst = false;
+            } else {
+                // Re-sign split APKs with the same keystore
+                logger.i("Re-signing split " + srcApkFile.getName() + " -> " + outputFile.getName());
+                resignSplitApk(srcApkFile, outputFile);
+            }
         }
-
-        File srcApkFile;
-        if (apkPaths.size() > 1) {
-            logger.i("Merging " + apkPaths.size() + " split APKs into single APK...");
-            srcApkFile = mergeSplitApks(apkPaths, outputDir);
-            logger.i("Merged APK: " + srcApkFile);
-        } else {
-            srcApkFile = new File(apkPaths.get(0)).getAbsoluteFile();
-        }
-
-        String apkFileName = srcApkFile.getName();
-        File outputFile = new File(outputDir, String.format(
-                Locale.getDefault(), "%s-%d-npatched.apk",
-                FilenameUtils.getBaseName(apkFileName),
-                LSPConfig.instance.VERSION_CODE)
-        ).getAbsoluteFile();
-
-        if (outputFile.exists() && !forceOverwrite)
-            throw new PatchError(outputFile.getAbsolutePath() + " exists. Use --force to overwrite");
-        logger.i("Processing " + srcApkFile + " -> " + outputFile);
-        patch(srcApkFile, outputFile, preExtractedSignature);
     }
 
-    private File mergeSplitApks(List<String> paths, File outputDir) throws PatchError, IOException {
-        File baseApk = new File(paths.get(0)).getAbsoluteFile();
-        // Copy base APK to preserve its signing block for signature bypass
-        File mergedFile = new File(outputDir, "merged_" + baseApk.getName());
-        mergedFile.delete();
-        try (var in_ = new FileInputStream(baseApk);
-             var out_ = new java.io.FileOutputStream(mergedFile)) {
-            in_.transferTo(out_);
-        }
-
-        // Add split APK entries into the copied base APK
-        try (ZFile merged = ZFile.openReadWrite(mergedFile, Z_FILE_OPTIONS)) {
-            for (int i = 1; i < paths.size(); i++) {
-                File splitFile = new File(paths.get(i)).getAbsoluteFile();
-                logger.i("  Merging split: " + splitFile.getName());
-                try (ZFile split = ZFile.openReadOnly(splitFile)) {
-                    for (StoredEntry entry : split.entries()) {
-                        String name = entry.getCentralDirectoryHeader().getName();
-                        if (name.startsWith("META-INF/")) continue;
-                        if (name.equals("AndroidManifest.xml")) continue;
-                        if (merged.get(name) != null) continue;
-                        boolean isStored = entry.getCentralDirectoryHeader()
-                                .getCompressionInfoWithWait().getMethod()
-                                == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
-                        merged.add(name, entry.open(), !isStored);
-                    }
+    private void resignSplitApk(File srcApkFile, File outputFile) throws PatchError {
+        try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
+             ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
+            var keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            if (keystoreArgs.get(0) == null) {
+                try (var is = getClass().getClassLoader().getResourceAsStream("assets/keystore")) {
+                    keyStore.load(is, keystoreArgs.get(1).toCharArray());
+                }
+            } else {
+                try (var is = new FileInputStream(keystoreArgs.get(0))) {
+                    keyStore.load(is, keystoreArgs.get(1).toCharArray());
                 }
             }
-            merged.realign();
+            var entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(
+                    keystoreArgs.get(2),
+                    new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
+            new SigningExtension(SigningOptions.builder()
+                    .setMinSdkVersion(27)
+                    .setV2SigningEnabled(true)
+                    .setCertificates((X509Certificate[]) entry.getCertificateChain())
+                    .setKey(entry.getPrivateKey())
+                    .build()).register(dstZFile);
+            for (StoredEntry storedEntry : srcZFile.entries()) {
+                String name = storedEntry.getCentralDirectoryHeader().getName();
+                if (name.startsWith("META-INF/")) continue;
+                boolean isStored = storedEntry.getCentralDirectoryHeader()
+                        .getCompressionInfoWithWait().getMethod()
+                        == com.android.tools.build.apkzlib.zip.CompressionMethod.STORE;
+                dstZFile.add(name, storedEntry.open(), !isStored);
+            }
+        } catch (Exception e) {
+            throw new PatchError("Failed to re-sign split APK: " + e.getMessage());
         }
-        return mergedFile;
     }
 
     public void patch(File srcApkFile, File outputFile) throws PatchError, IOException {
-        patch(srcApkFile, outputFile, null);
-    }
-
-    public void patch(File srcApkFile, File outputFile, String preExtractedSignature) throws PatchError, IOException {
         if (!srcApkFile.exists())
             throw new PatchError("The source apk file does not exit. Please provide a correct path.");
 
@@ -280,8 +274,7 @@ public class NPatch {
 
             String originalSignature = null;
             if (sigbypassLevel > 0) {
-                originalSignature = preExtractedSignature != null ? preExtractedSignature
-                        : ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+                originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                 if (originalSignature == null || originalSignature.isEmpty()) {
                     throw new PatchError("get original signature failed");
                 }
@@ -485,10 +478,8 @@ public class NPatch {
             property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, 27));
         property.addApplicationAttribute(new AttributeItem(NodeValue.Application.DEBUGGABLE, debuggableFlag));
         property.addApplicationAttribute(new AttributeItem("appComponentFactory", PROXY_APP_COMPONENT_FACTORY));
-        // Remove split APK requirement for merged APKs
+        // Disable split requirement (in case of merged split APKs)
         property.addApplicationAttribute(new AttributeItem("isSplitRequired", false));
-        property.addManifestAttribute(new AttributeItem("isSplitRequired", false));
-        property.addManifestAttribute(new AttributeItem("requiredSplitTypes", ""));
         if (!targetPackage.equals(originPackage)) {
             property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.PACKAGE, targetPackage).setNamespace(null));
         }
