@@ -432,7 +432,12 @@ public class NPatch {
 
                 if (!linked) {
                     try (InputStream is = entry.open()) {
-                        if (name.endsWith(".so") || name.equals("resources.arsc")) {
+                        // Apply GMS redirect to DEX files if enabled
+                        if (useNPatchGms && name.startsWith("classes") && name.endsWith(".dex")) {
+                            byte[] dexBytes = DexGmsRedirect.readStream(is);
+                            dexBytes = DexGmsRedirect.patchDex(dexBytes, Constants.NPATCH_GMS_PACKAGE_NAME, logger);
+                            dstZFile.add(name, new java.io.ByteArrayInputStream(dexBytes));
+                        } else if (name.endsWith(".so") || name.equals("resources.arsc")) {
                             dstZFile.add(name, is, false);
                         } else {
                             dstZFile.add(name, is);
