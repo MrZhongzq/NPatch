@@ -368,14 +368,6 @@ public class NPatch {
                 throw new PatchError("Error when adding dex", e);
             }
 
-            if (isInjectProvider){
-                try (var is = getClass().getClassLoader().getResourceAsStream("assets/mtprovider.dex")) {
-                    dstZFile.add("assets/npatch/mtprovider.dex", is);
-                } catch (Throwable e) {
-                    throw new PatchError("Error when adding dex", e);
-                }
-            }
-
             if (!useManager) {
                 logger.i("Adding loader dex...");
                 try (var is = getClass().getClassLoader().getResourceAsStream(LOADER_DEX_ASSET_PATH)) {
@@ -532,7 +524,6 @@ public class NPatch {
         if (isInjectProvider){
             HashMap<String,String> providerMap = new HashMap<>();
             providerMap.put("name","bin.mt.file.content.MTDataFilesProvider");
-            providerMap.put("permission","android.permission.MANAGE_DOCUMENTS");
             providerMap.put("exported","true");
             providerMap.put("authorities", targetPackage + ".MTDataFilesProvider");
             providerMap.put("grantUriPermissions","true");

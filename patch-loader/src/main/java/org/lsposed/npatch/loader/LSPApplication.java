@@ -1,8 +1,6 @@
 package org.lsposed.npatch.loader;
 
 import static org.lsposed.npatch.share.Constants.CONFIG_ASSET_PATH;
-import static org.lsposed.npatch.share.Constants.PROVIDER_DEX_ASSET_PATH;
-
 import android.app.ActivityThread;
 import android.app.LoadedApk;
 import android.content.Context;
@@ -32,12 +30,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -176,55 +171,13 @@ public class LSPApplication {
             Log.i(TAG, "Signature bypass level: " + config.sigBypassLevel);
 
             Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader);
-            long sourceCrc = OriginApkHelper.getOriginalApkCrc(appInfo.sourceDir);
-
             appInfo.sourceDir = cacheApkPath.toString();
             appInfo.publicSourceDir = cacheApkPath.toString();
             appInfo.appComponentFactory = config.appComponentFactory;
 
-            Path providerPath = null;
-            if (config.injectProvider) {
-                providerPath = cacheApkPath.getParent().resolve("p_" + sourceCrc + ".dex");
-                try {
-                    Files.deleteIfExists(providerPath);
-                    try (InputStream is = baseClassLoader.getResourceAsStream(PROVIDER_DEX_ASSET_PATH)) {
-                        if (is != null) Files.copy(is, providerPath);
-                    }
-                    if (Files.exists(providerPath)) {
-                        providerPath.toFile().setWritable(false);
-                    } else {
-                        providerPath = null;
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to inject provider:" + Log.getStackTraceString(e));
-                    providerPath = null;
-                }
-            }
-
             var mPackages = (Map<?, ?>) XposedHelpers.getObjectField(activityThread, "mPackages");
             mPackages.remove(appInfo.packageName);
             appLoadedApk = activityThread.getPackageInfoNoCheck(appInfo, compatInfo);
-
-            if (config.injectProvider && providerPath != null) {
-                try {
-                    ClassLoader loader = appLoadedApk.getClassLoader();
-                    Object dexPathList = XposedHelpers.getObjectField(loader, "pathList");
-                    Object dexElements = XposedHelpers.getObjectField(dexPathList, "dexElements");
-                    int length = Array.getLength(dexElements);
-                    Object newElements = Array.newInstance(dexElements.getClass().getComponentType(), length + 1);
-                    System.arraycopy(dexElements, 0, newElements, 0, length);
-
-                    // Use reflection for DexFile to handle deprecation on Android 14+
-                    Class<?> dexFileClass = Class.forName("dalvik.system.DexFile");
-                    Object dexFile = dexFileClass.getConstructor(String.class).newInstance(providerPath.toString());
-                    Class<?> elementClass = Class.forName("dalvik.system.DexPathList$Element");
-                    Object element = elementClass.getConstructor(dexFileClass).newInstance(dexFile);
-                    Array.set(newElements, length, element);
-                    XposedHelpers.setObjectField(dexPathList, "dexElements", newElements);
-                } catch (Throwable e) {
-                    Log.e(TAG, "Failed to inject provider dex: " + e.getMessage(), e);
-                }
-            }
 
             XposedHelpers.setObjectField(mBoundApplication, "info", appLoadedApk);
 

@@ -8,147 +8,142 @@ on:
 
 jobs:
   build:
-    name: 構建
+    name: Build
     runs-on: ubuntu-latest
     env:
-      CCACHE_COMPILERCHECK: '%compiler% -dumpmachine; %compiler% -dumpversion'
-      CCACHE_NOHASHDIR: 'true'
-      CCACHE_HARDLINK: 'true'
-      CCACHE_BASEDIR: '${{ github.workspace }}'
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_BASEDIR: "${{ github.workspace }}"
 
     steps:
-    - name: 檢出程式碼
-      uses: actions/checkout@v5
-      with:
-        ref: ${{ github.sha }}
-        submodules: 'recursive'
-        fetch-depth: 0
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
 
-    - name: 設定快取
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-ccache-
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
 
-    - name: 如果需要，則寫入簽名密鑰
-      if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
-      run: |
-        if [ ! -z "${{ secrets.KEY_STORE }}" ]; then
-          echo androidStorePassword='${{ secrets.KEY_STORE_PASSWORD }}' >> gradle.properties
-          echo androidKeyAlias='${{ secrets.ALIAS }}' >> gradle.properties
-          echo androidKeyPassword='${{ secrets.KEY_PASSWORD }}' >> gradle.properties
-          echo androidStoreFile='key.jks' >> gradle.properties
-          echo ${{ secrets.KEY_STORE }} | base64 --decode > key.jks
-        fi
+      - name: Prepare signing keystore
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/data-fixed') && github.event_name != 'pull_request'
+        run: |
+          if [ -n "${{ secrets.KEY_STORE }}" ]; then
+            echo androidStorePassword='${{ secrets.KEY_STORE_PASSWORD }}' >> gradle.properties
+            echo androidKeyAlias='${{ secrets.ALIAS }}' >> gradle.properties
+            echo androidKeyPassword='${{ secrets.KEY_PASSWORD }}' >> gradle.properties
+            echo androidStoreFile='key.jks' >> gradle.properties
+            echo ${{ secrets.KEY_STORE }} | base64 --decode > key.jks
+          fi
 
-    - name: 檢出 libxposed/api
-      uses: actions/checkout@main
-      with:
-        repository: libxposed/api
-        path: libxposed/api
+      - name: Checkout libxposed/api
+        uses: actions/checkout@main
+        with:
+          repository: libxposed/api
+          path: libxposed/api
 
-    - name: 檢出 libxposed/service
-      uses: actions/checkout@main
-      with:
-        repository: libxposed/service
-        path: libxposed/service
+      - name: Checkout libxposed/service
+        uses: actions/checkout@main
+        with:
+          repository: libxposed/service
+          path: libxposed/service
 
-    - name: 設定 Java
-      uses: actions/setup-java@v5
-      with:
-        java-version: '21'
-        distribution: 'zulu'
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: zulu
 
-    - name: 設定 Gradle
-      uses: gradle/actions/setup-gradle@v5
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
 
-    - name: 設定 Android SDK
-      uses: android-actions/setup-android@v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: 設定 ninja
-      uses: seanmiddleditch/gha-setup-ninja@master
-      with:
-        version: 1.12.1
+      - name: Set up Ninja
+        uses: seanmiddleditch/gha-setup-ninja@master
+        with:
+          version: 1.12.1
 
-    - name: 設定 CMake
-      uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: '4.1.1'
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 4.1.1
 
-    - name: 移除 Android 的 cmake
-      shell: bash
-      run: rm -rf "$ANDROID_HOME/cmake"
+      - name: Remove bundled Android CMake
+        shell: bash
+        run: rm -rf "$ANDROID_HOME/cmake"
 
-    - name: 設定構建環境
-      run: |
-        # for libxposed/api build
-        echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/api/gradle.properties
+      - name: Configure build environment
+        run: |
+          echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/api/gradle.properties
+          {
+            echo 'org.gradle.parallel=true'
+            echo 'org.gradle.jvmargs=-Xmx2048m'
+            echo 'android.native.buildOutput=verbose'
+          } >> gradle.properties
+          echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/api/gradle.properties
+          echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/service/gradle.properties
 
-        # for main project build
-        {
-          echo 'org.gradle.parallel=true'
-          echo 'org.gradle.jvmargs=-Xmx2048m'
-          echo 'android.native.buildOutput=verbose'
-        } >> gradle.properties
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
-        # for libxposed build
-        echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/api/gradle.properties
-        echo 'org.gradle.jvmargs=-Xmx2048m' >> libxposed/service/gradle.properties
+      - name: Publish libxposed artifacts locally
+        working-directory: libxposed
+        run: |
+          cd api
+          echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
+          ./gradlew :api:publishApiPublicationToMavenLocal
+          cd ../service
+          echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
+          ./gradlew :interface:publishInterfacePublicationToMavenLocal
 
-    - name: 授予 gradlew 執行權限
-      run: chmod +x gradlew
+      - name: Capture commit id
+        run: echo "commit=$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_ENV
 
-    - name: 使用 Gradle 構建依賴項
-      working-directory: libxposed
-      run: |
-        cd api
-        echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
-        ./gradlew :api:publishApiPublicationToMavenLocal
-        cd ../service
-        echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
-        ./gradlew :interface:publishInterfacePublicationToMavenLocal
+      - name: Build with Gradle
+        run: ./gradlew buildAll
 
-    - name: 設定 commit id
-      run: echo "commit=$(echo ${{ github.sha }} | cut -c-7)" > $GITHUB_ENV
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: npatch-release-${{ env.commit }}
+          path: out/release/*
+          retention-days: 14
 
-    - name: 使用 Gradle 構建
-      run: ./gradlew buildAll
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: npatch-debug-${{ env.commit }}
+          path: out/debug/*
+          retention-days: 7
 
-    - name: 上傳 Release Artifact
-      uses: actions/upload-artifact@v5
-      with:
-        name: npatch-release-${{ env.commit }}
-        path: out/release/*
-        retention-days: 14
+      - name: Upload mappings
+        uses: actions/upload-artifact@v5
+        with:
+          name: mappings-${{ env.commit }}
+          path: |
+            patch-loader/build/outputs/mapping
+            manager/build/outputs/mapping
 
-    - name: 上傳 Debug Artifact
-      uses: actions/upload-artifact@v5
-      with:
-        name: npatch-debug-${{ env.commit }}
-        path: out/debug/*
-        retention-days: 7
+      - name: Upload symbols
+        uses: actions/upload-artifact@v5
+        with:
+          name: symbols-${{ env.commit }}
+          path: |
+            patch-loader/build/symbols
 
-    - name: 上傳 mappings
-      uses: actions/upload-artifact@v5
-      with:
-        name: mappings-${{ env.commit }}
-        path: |
-          patch-loader/build/outputs/mapping
-          manager/build/outputs/mapping
-
-    - name: 上傳 symbols
-      uses: actions/upload-artifact@v5
-      with:
-        name: symbols-${{ env.commit }}
-        path: |
-          patch-loader/build/symbols
-
-    - name: 上傳 Manager APK
-      uses: actions/upload-artifact@v5
-      with:
-        name: npatch-manager-${{ env.commit }}
-        path: |
-          manager/build/outputs/apk/**/*.apk
-        retention-days: 14
+      - name: Upload manager APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: npatch-manager-${{ env.commit }}
+          path: |
+            manager/build/outputs/apk/**/*.apk
+          retention-days: 14

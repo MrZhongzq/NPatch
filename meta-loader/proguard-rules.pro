@@ -2,6 +2,12 @@
     public static byte[] dex;
     <init>();
 }
+-keep class bin.mt.file.content.MTDataFilesProvider {
+    <init>();
+}
+-keep class bin.mt.file.content.MTDataFilesWakeUpActivity {
+    <init>();
+}
 -keep class * extends androidx.room.Entity {
     <fields>;
 }
