@@ -35,6 +35,7 @@ object Patcher {
                     add("-m"); add(it)
                 }
                 if (config.injectProvider) add("--provider")
+                if (config.mirrorMode) add("--mirror")
                 if(injectDex) add("--injectdex")
                 if (config.installerSource != null && config.installerSource.isNotEmpty()) {
                     add("--installerSource"); add(config.installerSource)

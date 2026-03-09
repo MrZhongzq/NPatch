@@ -365,11 +365,24 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             desc = stringResource(R.string.patch_inject_dex_desc)
         )
         SettingsCheckBox(
-            modifier = Modifier.clickable { viewModel.injectProvider = !viewModel.injectProvider },
-            checked = viewModel.injectProvider,
+            modifier = if (viewModel.mirrorMode) Modifier else Modifier.clickable { viewModel.injectProvider = !viewModel.injectProvider },
+            checked = viewModel.injectProvider || viewModel.mirrorMode,
+            enabled = !viewModel.mirrorMode,
             icon = Icons.Outlined.AddCard,
             title = stringResource(R.string.patch_inject_mt_provider),
             desc = stringResource(R.string.patch_inject_mt_provider_desc)
+        )
+        SettingsCheckBox(
+            modifier = Modifier.clickable {
+                viewModel.mirrorMode = !viewModel.mirrorMode
+                if (viewModel.mirrorMode) {
+                    viewModel.injectProvider = true
+                }
+            },
+            checked = viewModel.mirrorMode,
+            icon = Icons.Outlined.FolderCopy,
+            title = stringResource(R.string.patch_enable_mirror_mode),
+            desc = stringResource(R.string.patch_enable_mirror_mode_desc)
         )
         SettingsCheckBox(
             modifier = Modifier.clickable { viewModel.outputLog = !viewModel.outputLog },

@@ -6,6 +6,7 @@ public class PatchConfig {
     public final boolean debuggable;
     public final boolean overrideVersionCode;
     public final boolean injectProvider;
+    public final boolean mirrorMode;
     public final boolean outputLog;
     public final int sigBypassLevel;
     public final String originalSignature;
@@ -24,6 +25,7 @@ public class PatchConfig {
             String originalSignature,
             String appComponentFactory,
             boolean injectProvider,
+            boolean mirrorMode,
             boolean outputLog,
             String newPackage,
             String installerSource,
@@ -37,6 +39,7 @@ public class PatchConfig {
         this.appComponentFactory = appComponentFactory;
         this.lspConfig = LSPConfig.instance;
         this.injectProvider = injectProvider;
+        this.mirrorMode = mirrorMode;
         this.managerPackageName = Constants.MANAGER_PACKAGE_NAME;
         this.newPackage = newPackage;
         this.outputLog = outputLog;
