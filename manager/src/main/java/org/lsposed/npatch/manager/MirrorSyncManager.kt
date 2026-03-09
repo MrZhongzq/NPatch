@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.lsposed.npatch.share.PatchConfig
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Locale
 
@@ -223,9 +224,11 @@ object MirrorSyncManager {
         localFile: File
     ) {
         localFile.parentFile?.mkdirs()
-        resolver.openInputStream(buildFileUri(authority, remoteEntry.documentId))?.use { input ->
-            FileOutputStream(localFile, false).use { output ->
-                input.copyTo(output)
+        resolver.openFileDescriptor(buildFileUri(authority, remoteEntry.documentId), "r")?.use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).use { input ->
+                FileOutputStream(localFile, false).use { output ->
+                    input.copyTo(output)
+                }
             }
         } ?: throw IllegalStateException("Unable to open remote document ${remoteEntry.documentId}")
         if (remoteEntry.lastModified > 0L) {
