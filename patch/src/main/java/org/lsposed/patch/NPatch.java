@@ -628,7 +628,7 @@ public class NPatch {
             providerMap.put("authorities", targetPackage + ".NPatchDataProvider");
             providerMap.put("grantUriPermissions", "true");
 
-            property.addProvider(providerMap, null);
+            property.addProvider(providerMap, "org.lsposed.npatch.action.DATA_MIRROR");
         }
 
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
