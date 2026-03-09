@@ -262,9 +262,10 @@ public class NPatch {
         }
 
         try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
-             ZFile srcZFile = embedOriginal
-                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, embeddedOriginalApk, false)
-                     : ZFile.openReadOnly(srcApkFile)) {
+             ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
+            if (embedOriginal) {
+                dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, embeddedOriginalApk, false);
+            }
 
             // sign apk
             try {
