@@ -170,7 +170,7 @@ public class LSPApplication {
             Log.i(TAG, "Use manager: " + config.useManager);
             Log.i(TAG, "Signature bypass level: " + config.sigBypassLevel);
 
-            Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader);
+            Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader, config.isInjectProvider);
             appInfo.sourceDir = cacheApkPath.toString();
             appInfo.publicSourceDir = cacheApkPath.toString();
             appInfo.appComponentFactory = config.appComponentFactory;
