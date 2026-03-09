@@ -8,6 +8,9 @@
 -keep class bin.mt.file.content.MTDataFilesWakeUpActivity {
     <init>();
 }
+-keep class org.lsposed.npatch.metaloader.NPatchDataProvider {
+    <init>();
+}
 -keep class * extends androidx.room.Entity {
     <fields>;
 }

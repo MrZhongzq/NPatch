@@ -122,7 +122,11 @@ object MirrorSyncManager {
             val remoteChild = remoteChildren[name]
             val localChild = localChildren[name] ?: File(localDir, name)
             val documentId = remoteChild?.documentId ?: joinDocumentId(remoteDir.documentId, name)
-            syncEntry(resolver, authority, documentId, remoteChild, localChild)
+            runCatching {
+                syncEntry(resolver, authority, documentId, remoteChild, localChild)
+            }.onFailure {
+                Log.w(TAG, "Skipping mirror entry $documentId", it)
+            }
         }
     }
 
