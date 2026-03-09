@@ -264,7 +264,9 @@ public final class NPatchDataProvider extends ContentProvider {
         File target = childPath.isEmpty() ? root : new File(root, childPath);
         try {
             File canonicalRoot = root.getCanonicalFile();
-            File canonicalTarget = requireExists ? target.getCanonicalFile() : target.getAbsoluteFile();
+            File canonicalTarget = childPath.isEmpty()
+                    ? canonicalRoot
+                    : new File(canonicalRoot, childPath).getCanonicalFile();
             if (!isFileUnder(canonicalRoot, canonicalTarget)) {
                 throw new FileNotFoundException(documentId + " not found");
             }
