@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,7 +77,7 @@ public class OriginApkHelper {
                 }
                 injectProviderDex(internalCacheApk, providerDex.bytes);
                 clearProviderMarkers(internalOriginDir, sourceCrc);
-                Files.writeString(providerMarker, Long.toString(providerDex.crc),
+                Files.write(providerMarker, Long.toString(providerDex.crc).getBytes(StandardCharsets.UTF_8),
                         StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                 Log.i(TAG, "Injected provider dex into cached origin apk");
             }
