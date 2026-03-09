@@ -119,5 +119,13 @@
             android:exported="true"
             android:enabled="true" />
 
+        <receiver
+            android:name=".manager.MiPushFallbackReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.lsposed.npatch.action.POST_MIPUSH_FALLBACK" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
