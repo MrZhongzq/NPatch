@@ -254,7 +254,7 @@ public class NPatch {
 
         logger.i("Parsing original apk...");
 
-        boolean embedOriginal = sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
+        boolean embedOriginal = useManager || sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
         File embeddedOriginalApk = srcApkFile;
         File tempEmbeddedOriginalApk = null;
 
