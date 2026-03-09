@@ -25,9 +25,14 @@ object MirrorSyncManager {
     private const val TAG = "MirrorSyncManager"
     private const val META_DATA_KEY = "npatch"
     private const val MIRROR_DIR_NAME = "SAF"
-    private const val PROVIDER_SUFFIX = ".MTDataFilesProvider"
-    private const val METHOD_SET_LAST_MODIFIED = "mt:setLastModified"
-    private const val EXTRA_URI = "uri"
+    private const val PROVIDER_SUFFIX = ".NPatchDataProvider"
+    private const val PATH_DOCUMENT = "document"
+    private const val PATH_CHILDREN = "children"
+    private const val PATH_FILE = "file"
+    private const val METHOD_MKDIRS = "npatch:mkdirs"
+    private const val METHOD_DELETE = "npatch:delete"
+    private const val METHOD_SET_LAST_MODIFIED = "npatch:setLastModified"
+    private const val EXTRA_DOCUMENT_ID = "id"
     private const val EXTRA_TIME = "time"
     private const val TIMESTAMP_TOLERANCE_MS = 2000L
 
@@ -214,7 +219,7 @@ object MirrorSyncManager {
         localFile: File
     ) {
         localFile.parentFile?.mkdirs()
-        resolver.openInputStream(buildDocumentUri(authority, remoteEntry.documentId))?.use { input ->
+        resolver.openInputStream(buildFileUri(authority, remoteEntry.documentId))?.use { input ->
             FileOutputStream(localFile, false).use { output ->
                 input.copyTo(output)
             }
@@ -236,23 +241,7 @@ object MirrorSyncManager {
             deleteRemoteEntry(resolver, authority, documentId)
             remoteEntry = null
         }
-        if (remoteEntry == null) {
-            val parentDocumentId = parentDocumentId(documentId) ?: return
-            val parentUri = buildDocumentUri(authority, parentDocumentId)
-            runCatching {
-                DocumentsContract.createDocument(
-                    resolver,
-                    parentUri,
-                    guessMimeType(localFile.name),
-                    localFile.name
-                )
-            }
-            remoteEntry = queryRemoteEntry(resolver, authority, documentId)
-            if (remoteEntry == null) {
-                return
-            }
-        }
-        val targetUri = buildDocumentUri(authority, documentId)
+        val targetUri = buildFileUri(authority, documentId)
         resolver.openFileDescriptor(targetUri, "rwt")?.use { descriptor ->
             localFile.inputStream().use { input ->
                 FileOutputStream(descriptor.fileDescriptor).use { output ->
@@ -283,20 +272,12 @@ object MirrorSyncManager {
         if (existing != null) {
             return existing.isDirectory
         }
-        val parentDocumentId = parentDocumentId(documentId) ?: return false
-        if (!ensureRemoteDirectory(resolver, authority, parentDocumentId) && parentDocumentId.contains('/')) {
-            return false
-        }
-        val name = documentId.substringAfterLast('/')
-        val parentUri = buildDocumentUri(authority, parentDocumentId)
-        runCatching {
-            DocumentsContract.createDocument(
-                resolver,
-                parentUri,
-                DocumentsContract.Document.MIME_TYPE_DIR,
-                name
-            )
-        }
+        callProvider(
+            resolver,
+            buildDocumentUri(authority, documentId),
+            METHOD_MKDIRS,
+            Bundle().apply { putString(EXTRA_DOCUMENT_ID, documentId) }
+        )
         return queryRemoteEntry(resolver, authority, documentId)?.isDirectory == true
     }
 
@@ -305,11 +286,12 @@ object MirrorSyncManager {
         authority: String,
         documentId: String
     ) {
-        runCatching {
-            DocumentsContract.deleteDocument(resolver, buildDocumentUri(authority, documentId))
-        }.onFailure {
-            Log.w(TAG, "Failed to delete remote entry $documentId", it)
-        }
+        callProvider(
+            resolver,
+            buildDocumentUri(authority, documentId),
+            METHOD_DELETE,
+            Bundle().apply { putString(EXTRA_DOCUMENT_ID, documentId) }
+        )
     }
 
     private fun listRemoteChildren(
@@ -317,7 +299,7 @@ object MirrorSyncManager {
         authority: String,
         documentId: String
     ): List<RemoteEntry> {
-        val uri = DocumentsContract.buildChildDocumentsUri(authority, documentId)
+        val uri = buildChildrenUri(authority, documentId)
         val entries = ArrayList<RemoteEntry>()
         resolver.query(uri, documentProjection, null, null, null)?.use { cursor ->
             val documentIdIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
@@ -361,18 +343,50 @@ object MirrorSyncManager {
     }
 
     private fun buildDocumentUri(authority: String, documentId: String): Uri {
-        return DocumentsContract.buildDocumentUri(authority, documentId)
+        return Uri.Builder()
+            .scheme("content")
+            .authority(authority)
+            .appendPath(PATH_DOCUMENT)
+            .appendQueryParameter(EXTRA_DOCUMENT_ID, documentId)
+            .build()
+    }
+
+    private fun buildChildrenUri(authority: String, documentId: String): Uri {
+        return Uri.Builder()
+            .scheme("content")
+            .authority(authority)
+            .appendPath(PATH_CHILDREN)
+            .appendQueryParameter(EXTRA_DOCUMENT_ID, documentId)
+            .build()
+    }
+
+    private fun buildFileUri(authority: String, documentId: String): Uri {
+        return Uri.Builder()
+            .scheme("content")
+            .authority(authority)
+            .appendPath(PATH_FILE)
+            .appendQueryParameter(EXTRA_DOCUMENT_ID, documentId)
+            .build()
     }
 
     private fun setRemoteLastModified(resolver: ContentResolver, uri: Uri, time: Long) {
         val extras = Bundle().apply {
-            putParcelable(EXTRA_URI, uri)
+            putString(EXTRA_DOCUMENT_ID, uri.getQueryParameter(EXTRA_DOCUMENT_ID))
             putLong(EXTRA_TIME, time)
         }
+        callProvider(resolver, uri, METHOD_SET_LAST_MODIFIED, extras)
+    }
+
+    private fun callProvider(
+        resolver: ContentResolver,
+        uri: Uri,
+        method: String,
+        extras: Bundle
+    ) {
         runCatching {
-            resolver.call(uri, METHOD_SET_LAST_MODIFIED, null, extras)
+            resolver.call(uri, method, null, extras)
         }.onFailure {
-            Log.w(TAG, "Failed to set last modified for $uri", it)
+            Log.w(TAG, "Provider call failed: $method $uri", it)
         }
     }
 

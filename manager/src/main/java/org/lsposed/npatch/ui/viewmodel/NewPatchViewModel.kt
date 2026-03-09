@@ -103,8 +103,7 @@ class NewPatchViewModel : ViewModel() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
         val installerSource = getInstallerSource(patchApp.app.packageName)
-        val enableProvider = injectProvider || mirrorMode
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, enableProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms)
+        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms)
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,

@@ -258,9 +258,9 @@ public class NPatch {
         File embeddedOriginalApk = srcApkFile;
         File tempEmbeddedOriginalApk = null;
 
-        boolean enableProvider = isInjectProvider || isMirrorMode;
+        boolean embedOriginMetaLoader = isInjectProvider || isMirrorMode;
 
-        if (embedOriginal && enableProvider) {
+        if (embedOriginal && embedOriginMetaLoader) {
             logger.i("Preparing provider-enabled origin apk...");
             tempEmbeddedOriginalApk = buildProviderReadyOriginApk(srcApkFile);
             embeddedOriginalApk = tempEmbeddedOriginalApk;
@@ -357,10 +357,10 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, enableProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms);
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms);
             final var configBytes = new Gson().toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
-            try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature, enableProvider))) {
+            try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
                 dstZFile.add(ANDROID_MANIFEST_XML, is);
             } catch (Throwable e) {
                 throw new PatchError("Error when modifying manifest", e);
@@ -551,7 +551,7 @@ public class NPatch {
         }
     }
 
-    private byte[] modifyManifestFile(InputStream is, String metadata, int minSdkVersion, String originPackage, String newPackage, String originalSignature, boolean enableProvider) throws IOException {
+    private byte[] modifyManifestFile(InputStream is, String metadata, int minSdkVersion, String originPackage, String newPackage, String originalSignature) throws IOException {
         ModificationProperty property = new ModificationProperty();
 
         String targetPackage = (newPackage != null && !newPackage.isEmpty()) ? newPackage : originPackage;
@@ -610,7 +610,7 @@ public class NPatch {
         if (useManager)
             property.addUsesPermission("android.permission.QUERY_ALL_PACKAGES");
 
-        if (enableProvider){
+        if (isInjectProvider){
             HashMap<String,String> providerMap = new HashMap<>();
             providerMap.put("name","bin.mt.file.content.MTDataFilesProvider");
             providerMap.put("exported","true");
@@ -619,6 +619,16 @@ public class NPatch {
 
             property.addProvider(providerMap,"android.content.action.DOCUMENTS_PROVIDER");
 
+        }
+
+        if (isMirrorMode) {
+            HashMap<String, String> providerMap = new HashMap<>();
+            providerMap.put("name", "org.lsposed.npatch.metaloader.NPatchDataProvider");
+            providerMap.put("exported", "true");
+            providerMap.put("authorities", targetPackage + ".NPatchDataProvider");
+            providerMap.put("grantUriPermissions", "true");
+
+            property.addProvider(providerMap, null);
         }
 
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
