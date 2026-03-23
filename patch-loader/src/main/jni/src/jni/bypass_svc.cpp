@@ -1,9 +1,10 @@
 #include "bypass_svc.h"
-#include "logging.h"
-#include "native_util.h"
+#include "common/logging.h"
+#include "npatch_compat.h"
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <ucontext.h>
 #include <pthread.h>
@@ -18,7 +19,7 @@
 #include <mutex>
 #include <condition_variable>
 
-namespace lspd {
+namespace vector::native {
 
     // --- 共用結構與變數 ---
     // 將此變數移出 #if 區塊，確保 IDE 和編譯器在任何架構下都能識別，避免未定義錯誤。
@@ -271,4 +272,4 @@ namespace lspd {
     void RegisterSvcBypass(JNIEnv *env) {
         REGISTER_LSP_NATIVE_METHODS(SvcBypass);
     }
-}
+}  // namespace vector::native

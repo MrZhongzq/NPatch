@@ -130,14 +130,11 @@ public class LSPApplication {
 
         disableProfile(context);
         Startup.initXposed(false, ActivityThread.currentProcessName(), context.getApplicationInfo().dataDir, service);
-        Startup.bootstrapXposed();
+        Startup.bootstrapXposed(false);
 
         // WARN: Since it uses `XResource`, the following class should not be initialized
         // before forkPostCommon is invoke. Otherwise, you will get failure of XResources
 
-        if (config.outputLog) {
-            XposedBridge.setLogPrinter(new XposedLogPrinter(0, "NPatch"));
-        }
         Log.i(TAG, "Load modules");
         LSPLoader.initModules(appLoadedApk);
         Log.i(TAG, "Modules initialized");

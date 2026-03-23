@@ -2,7 +2,13 @@ project(npatch)
 cmake_minimum_required(VERSION 3.31.1)
 
 set(CMAKE_CXX_STANDARD 23)
-add_subdirectory(${CORE_ROOT} core)
+
+# VERSION_NAME needs to be a quoted string for C/C++
+if(DEFINED NPATCH_VERSION_NAME)
+    add_compile_definitions(VERSION_NAME="${NPATCH_VERSION_NAME}")
+endif()
+
+add_subdirectory(${CORE_ROOT} native)
 
 aux_source_directory(src SRC_LIST)
 aux_source_directory(src/jni SRC_LIST)
@@ -15,7 +21,7 @@ add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
-target_link_libraries(${PROJECT_NAME} core log)
+target_link_libraries(${PROJECT_NAME} native log)
 
 if (DEFINED DEBUG_SYMBOLS_PATH)
     set(DEBUG_SYMBOLS_PATH ${DEBUG_SYMBOLS_PATH}/${API})

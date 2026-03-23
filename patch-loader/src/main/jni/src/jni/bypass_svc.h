@@ -1,8 +1,8 @@
 #pragma once
 #include <jni.h>
 
-namespace lspd {
+namespace vector::native {
 
     void RegisterSvcBypass(JNIEnv* env);
 
-} // namespace lspd
+} // namespace vector::native

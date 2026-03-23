@@ -5,10 +5,10 @@
 
 #include "bypass_sig.h"
 
-#include "../src/native_api.h"
-#include "elf_util.h"
-#include "logging.h"
-#include "native_util.h"
+#include "core/native_api.h"
+#include "elf/elf_image.h"
+#include "common/logging.h"
+#include "npatch_compat.h"
 #include "patch_loader.h"
 #include "utils/hook_helper.hpp"
 #include "utils/jni_helper.hpp"
@@ -19,7 +19,7 @@
 
 using lsplant::operator""_sym;
 
-namespace lspd {
+namespace vector::native {
 
     static std::string targetApkPath;
     static std::string redirectApkPath;
@@ -29,8 +29,8 @@ namespace lspd {
     inline static constexpr const char* kLibCName = "libc.so";
 
     // 修改回傳型別以匹配 kImg 的實際型別
-    std::unique_ptr<SandHook::ElfImg> &GetC(bool release = false) {
-        static auto kImg = std::make_unique<SandHook::ElfImg>(kLibCName);
+    std::unique_ptr<vector::native::ElfImage> &GetC(bool release = false) {
+        static auto kImg = std::make_unique<vector::native::ElfImage>(kLibCName);
         if (release) {
             kImg.reset();
             kImg = nullptr;
@@ -107,4 +107,4 @@ namespace lspd {
 
     void RegisterBypass(JNIEnv *env) { REGISTER_LSP_NATIVE_METHODS(SigBypass); }
 
-}  // namespace lspd
+}  // namespace vector::native

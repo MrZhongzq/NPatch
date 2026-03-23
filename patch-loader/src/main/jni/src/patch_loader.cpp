@@ -25,16 +25,20 @@
 
 #include "art/runtime/jit/profile_saver.h"
 #include "art/runtime/oat_file_manager.h"
-#include "elf_util.h"
+#include "elf/elf_image.h"
 #include "jni/bypass_sig.h"
 #include "jni/bypass_svc.h"
-#include "native_util.h"
-#include "symbol_cache.h"
+#include "npatch_compat.h"
+#include "elf/symbol_cache.h"
 #include "utils/jni_helper.hpp"
+
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 using namespace lsplant;
 
-namespace lspd {
+namespace vector::native {
 
     void PatchLoader::LoadDex(JNIEnv* env, Context::PreloadedDex&& dex) {
         auto class_activity_thread = JNI_FindClass(env, "android/app/ActivityThread");
@@ -99,9 +103,9 @@ namespace lspd {
                     return HookInline(t, r, &bk) == 0 ? bk : nullptr;
                 },
                 .inline_unhooker = [](auto t) { return UnhookInline(t) == 0; },
-                .art_symbol_resolver = [](auto symbol) { return GetArt()->getSymbAddress(symbol); },
+                .art_symbol_resolver = [](auto symbol) { return ElfSymbolCache::GetArt()->getSymbAddress(symbol); },
                 .art_symbol_prefix_resolver =
-                [](auto symbol) { return GetArt()->getSymbPrefixFirstAddress(symbol); },
+                [](auto symbol) { return ElfSymbolCache::GetArt()->getSymbPrefixFirstAddress(symbol); },
         };
 
         auto stub = JNI_FindClass(env, "org/lsposed/npatch/metaloader/LSPAppComponentFactoryStub");
@@ -113,15 +117,29 @@ namespace lspd {
             return;
         }
 
-        auto dex = PreloadedDex{env->GetByteArrayElements(array.get(), nullptr), static_cast<size_t>(JNI_GetArrayLength(env, array.get()))};
+        auto dex_bytes = env->GetByteArrayElements(array.get(), nullptr);
+        auto dex_size = static_cast<size_t>(JNI_GetArrayLength(env, array.get()));
+
+        // Create memfd and write dex bytes into it for PreloadedDex (which now requires an fd)
+        int memfd = syscall(__NR_memfd_create, "npatch_dex", 0);
+        if (memfd < 0 || write(memfd, dex_bytes, dex_size) != static_cast<ssize_t>(dex_size)) {
+            LOGE("Failed to create memfd for dex.");
+            env->ReleaseByteArrayElements(array.get(), dex_bytes, JNI_ABORT);
+            if (memfd >= 0) close(memfd);
+            return;
+        }
+        env->ReleaseByteArrayElements(array.get(), dex_bytes, JNI_ABORT);
+
+        auto dex = PreloadedDex{memfd, dex_size};
+        close(memfd);
 
         InitArtHooker(env, initInfo);
         LoadDex(env, std::move(dex));
         InitHooks(env);
 
-        GetArt(true);
+        ElfSymbolCache::ClearCache();
 
         SetupEntryClass(env);
         FindAndCall(env, "onLoad", "()V");
     }
-}  // namespace lspd
+}  // namespace vector::native

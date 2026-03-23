@@ -22,7 +22,8 @@
 
 #include <vector>
 
-#include "context.h"
+#include "core/context.h"
+#include "npatch_compat.h"
 #include "utils/hook_helper.hpp"
 
 using namespace lsplant;

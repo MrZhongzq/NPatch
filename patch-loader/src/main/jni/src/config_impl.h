@@ -24,9 +24,9 @@
 #pragma once
 
 #include <string>
-#include "config_bridge.h"
+#include "core/config_bridge.h"
 
-namespace lspd {
+namespace vector::native {
 
     class ConfigImpl : public ConfigBridge {
     public:
@@ -34,11 +34,11 @@ namespace lspd {
             instance_ = std::make_unique<ConfigImpl>();
         }
 
-        virtual obfuscation_map_t& obfuscation_map() override {
+        virtual std::map<std::string, std::string>& obfuscation_map() override {
             return obfuscation_map_;
         }
 
-        virtual void obfuscation_map(obfuscation_map_t m) override {
+        virtual void obfuscation_map(std::map<std::string, std::string> m) override {
             obfuscation_map_ = std::move(m);
         }
 
@@ -50,8 +50,9 @@ namespace lspd {
                 { "android.content.res.XModule", "android.content.res.XModule"},
                 { "org.lsposed.lspd.core.", "org.lsposed.lspd.core."},
                 { "org.lsposed.lspd.nativebridge.", "org.lsposed.lspd.nativebridge."},
+                { "org.matrix.vector.nativebridge.", "org.matrix.vector.nativebridge."},
                 { "org.lsposed.lspd.service.", "org.lsposed.lspd.service."},
         };
     };
-}
+}  // namespace vector::native
 

@@ -23,9 +23,11 @@
 
 #pragma once
 
-#include "context.h"
+#include "core/context.h"
 
-namespace lspd {
+namespace lspd = vector::native;
+
+namespace vector::native {
 
     inline lsplant::InitInfo handler;
 
@@ -50,4 +52,4 @@ namespace lspd {
 
         void SetupEntryClass(JNIEnv* env) override;
     };
-} // namespace lspd
+} // namespace vector::native

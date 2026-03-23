@@ -52,6 +52,9 @@ val verCode by extra(commitCount)
 val verName by extra("0.7.4")
 val coreVerCode by extra(coreCommitCount)
 val coreVerName by extra(coreLatestTag)
+// Provider<String> extras required by upstream core/core/build.gradle.kts (Vector v2.0)
+val versionCodeProvider by extra(provider { coreCommitCount.toString() })
+val versionNameProvider by extra(provider { coreLatestTag })
 val androidMinSdkVersion by extra(27)
 val androidTargetSdkVersion by extra(36)
 val androidCompileSdkVersion by extra(36)
@@ -82,6 +85,8 @@ fun Project.configureBaseExtension() {
         ndkVersion = androidCompileNdkVersion
         buildToolsVersion = androidBuildToolsVersion
 
+        buildFeatures.buildConfig = true
+
         externalNativeBuild.cmake {
             version = "3.29.8+"
             buildStagingDirectory = layout.buildDirectory.get().asFile
@@ -106,8 +111,8 @@ fun Project.configureBaseExtension() {
             externalNativeBuild {
                 cmake {
                     arguments += "-DEXTERNAL_ROOT=${File(rootDir.absolutePath, "core/external")}"
-                    arguments += "-DCORE_ROOT=${File(rootDir.absolutePath, 
-                    "core/core/src/main/jni")}"
+                    arguments += "-DCORE_ROOT=${File(rootDir.absolutePath, "core/native")}"
+                    arguments += "-DVECTOR_ROOT=${File(rootDir.absolutePath, "core")}"
                     abiFilters("arm64-v8a", "x86_64")
                     val flags = arrayOf(
                         "-Wall",
@@ -122,13 +127,13 @@ fun Project.configureBaseExtension() {
                         "-Wno-builtin-macro-redefined",
                         "-Wno-unused-value",
                         "-D__FILE__=__FILE_NAME__",
+                        "-DVERSION_CODE=$verCode",
                     )
                     cppFlags("-std=c++20", *flags)
                     cFlags("-std=c18", *flags)
                     arguments(
                         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-                        "-DVERSION_CODE=$verCode",
-                        "-DVERSION_NAME=$verName",
+                        "-DNPATCH_VERSION_NAME=$verName",
                     )
                 }
             }
@@ -156,7 +161,7 @@ fun Project.configureBaseExtension() {
                 }
             }
             named("release") {
-                signingConfig = null
+                signingConfig = if (signingConfigs["config"].storeFile != null) signingConfigs["config"] else null
                 externalNativeBuild {
                     cmake {
                         val flags = arrayOf(
