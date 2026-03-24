@@ -19,7 +19,7 @@ import com.google.gson.Gson;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.lsposed.lspd.core.Startup;
+import org.matrix.vector.Startup;
 import org.lsposed.lspd.models.Module;
 import org.lsposed.lspd.service.ILSPApplicationService;
 import org.lsposed.npatch.loader.util.XLog;

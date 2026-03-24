@@ -50,7 +50,7 @@ include(
     ":xposed"
 )
 
-project(":core").projectDir = file("core/core")
+project(":core").projectDir = file("core/legacy")
 project(":external:apache").projectDir = file("core/external/apache")
 project(":external:axml").projectDir = file("core/external/axml")
 project(":hiddenapi:bridge").projectDir = file("core/hiddenapi/bridge")
