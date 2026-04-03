@@ -67,6 +67,7 @@ public class LSPApplication {
     private static LoadedApk appLoadedApk;
 
     private static PatchConfig config;
+    private static String cachedOriginalApkPath;
 
     public static boolean isIsolated() {
         return (Process.myUid() % PER_USER_RANGE) >= FIRST_APP_ZYGOTE_ISOLATED_UID;
@@ -140,7 +141,7 @@ public class LSPApplication {
         Log.i(TAG, "Modules initialized");
 
         switchAllClassLoader();
-        SigBypass.doSigBypass(context, config.sigBypassLevel);
+        SigBypass.doSigBypass(context, config.sigBypassLevel, cachedOriginalApkPath);
 
         // Activate GMS redirect if enabled (for Google apps with MicroG)
         if (config.useNPatchGms) {
@@ -173,6 +174,7 @@ public class LSPApplication {
             Log.i(TAG, "Signature bypass level: " + config.sigBypassLevel);
 
             Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader);
+            cachedOriginalApkPath = cacheApkPath.toString();
             long sourceCrc = OriginApkHelper.getOriginalApkCrc(appInfo.sourceDir);
 
             appInfo.sourceDir = cacheApkPath.toString();

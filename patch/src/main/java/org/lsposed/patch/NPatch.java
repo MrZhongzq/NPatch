@@ -52,6 +52,8 @@ import java.util.stream.Collectors;
 
 public class NPatch {
 
+    private static final Gson GSON = new Gson();
+
     static class PatchError extends Error {
         public PatchError(String message, Throwable cause) {
             super(message, cause);
@@ -336,7 +338,7 @@ public class NPatch {
             logger.i("Patching apk...");
             // modify manifest
             final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource, useNPatchGms);
-            final var configBytes = new Gson().toJson(config).getBytes(StandardCharsets.UTF_8);
+            final var configBytes = GSON.toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
                 dstZFile.add(ANDROID_MANIFEST_XML, is);
