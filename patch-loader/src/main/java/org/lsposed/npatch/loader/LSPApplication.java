@@ -320,7 +320,7 @@ public class LSPApplication {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile));
-            Process proc = pb.start();
+            pb.start();
             Log.i(TAG, "Logcat capture started -> " + logFile.getAbsolutePath());
         } catch (Throwable e) {
             Log.w(TAG, "Failed to start logcat capture", e);
