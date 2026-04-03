@@ -133,6 +133,11 @@ public class LSPApplication {
         Startup.initXposed(false, ActivityThread.currentProcessName(), context.getApplicationInfo().dataDir, service);
         Startup.bootstrapXposed(false);
 
+        // Start file-based log capture (replaces setLogPrinter removed in Vector v2.0)
+        if (config.outputLog) {
+            startLogcatCapture(context);
+        }
+
         // WARN: Since it uses `XResource`, the following class should not be initialized
         // before forkPostCommon is invoke. Otherwise, you will get failure of XResources
 
@@ -213,13 +218,40 @@ public class LSPApplication {
                     Object newElements = Array.newInstance(dexElements.getClass().getComponentType(), length + 1);
                     System.arraycopy(dexElements, 0, newElements, 0, length);
 
-                    // Use reflection for DexFile to handle deprecation on Android 14+
-                    Class<?> dexFileClass = Class.forName("dalvik.system.DexFile");
-                    Object dexFile = dexFileClass.getConstructor(String.class).newInstance(providerPath.toString());
-                    Class<?> elementClass = Class.forName("dalvik.system.DexPathList$Element");
-                    Object element = elementClass.getConstructor(dexFileClass).newInstance(dexFile);
-                    Array.set(newElements, length, element);
-                    XposedHelpers.setObjectField(dexPathList, "dexElements", newElements);
+                    Object element = null;
+                    // Try DexFile approach first (works on most Android versions)
+                    try {
+                        Class<?> dexFileClass = Class.forName("dalvik.system.DexFile");
+                        Object dexFile = dexFileClass.getConstructor(String.class).newInstance(providerPath.toString());
+                        Class<?> elementClass = Class.forName("dalvik.system.DexPathList$Element");
+                        element = elementClass.getConstructor(dexFileClass).newInstance(dexFile);
+                    } catch (Throwable e1) {
+                        Log.w(TAG, "DexFile approach failed, trying DexPathList.makeDexElements: " + e1.getMessage());
+                        // Fallback: use DexPathList.makeDexElements on Android 14+
+                        try {
+                            java.lang.reflect.Method makeDexElements = dexPathList.getClass().getDeclaredMethod(
+                                    "makeDexElements", List.class, File.class, List.class, ClassLoader.class);
+                            makeDexElements.setAccessible(true);
+                            List<File> files = new ArrayList<>();
+                            files.add(providerPath.toFile());
+                            List<IOException> suppressedExceptions = new ArrayList<>();
+                            Object[] elements = (Object[]) makeDexElements.invoke(null,
+                                    files, null, suppressedExceptions, loader);
+                            if (elements != null && elements.length > 0) {
+                                element = elements[0];
+                            }
+                        } catch (Throwable e2) {
+                            Log.e(TAG, "makeDexElements fallback also failed: " + e2.getMessage());
+                        }
+                    }
+
+                    if (element != null) {
+                        Array.set(newElements, length, element);
+                        XposedHelpers.setObjectField(dexPathList, "dexElements", newElements);
+                        Log.i(TAG, "Provider dex injected successfully");
+                    } else {
+                        Log.e(TAG, "Failed to create DexPathList element for provider");
+                    }
                 } catch (Throwable e) {
                     Log.e(TAG, "Failed to inject provider dex: " + e.getMessage(), e);
                 }
@@ -264,6 +296,34 @@ public class LSPApplication {
         } catch (Throwable e) {
             Log.e(TAG, "createLoadedApk", e);
             return null;
+        }
+    }
+
+    private static void startLogcatCapture(Context context) {
+        try {
+            String pkgName = context.getPackageName();
+            File logDir = new File(android.os.Environment.getExternalStorageDirectory(),
+                    "Android/media/" + pkgName + "/npatch/log");
+            if (!logDir.exists() && !logDir.mkdirs()) {
+                Log.w(TAG, "Failed to create log directory: " + logDir);
+                return;
+            }
+            String dateStr = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            File logFile = new File(logDir, dateStr + ".log");
+
+            // Capture logcat for NPatch/LSPosed/Xposed tags in background
+            String[] cmd = {"logcat", "-v", "threadtime",
+                    "NPatch:*", "LSPosed-Bridge:*", "Xposed:*",
+                    "NPatch-SigBypass:*", "NPatch-GmsRedirect:*", "NPatch-MetaLoader:*",
+                    "*:S"};
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile));
+            Process proc = pb.start();
+            Log.i(TAG, "Logcat capture started -> " + logFile.getAbsolutePath());
+        } catch (Throwable e) {
+            Log.w(TAG, "Failed to start logcat capture", e);
         }
     }
 
