@@ -120,21 +120,21 @@ jobs:
     - name: 上傳 Release Artifact
       uses: actions/upload-artifact@v5
       with:
-        name: npatch-release-${{ env.commit }}
+        name: npatch-release-${{ env.commit }}.zip
         path: out/release/*
         retention-days: 14
 
     - name: 上傳 Debug Artifact
       uses: actions/upload-artifact@v5
       with:
-        name: npatch-debug-${{ env.commit }}
+        name: npatch-debug-${{ env.commit }}.zip
         path: out/debug/*
         retention-days: 7
 
     - name: 上傳 mappings
       uses: actions/upload-artifact@v5
       with:
-        name: mappings-${{ env.commit }}
+        name: mappings-${{ env.commit }}.zip
         path: |
           patch-loader/build/outputs/mapping
           manager/build/outputs/mapping
@@ -142,14 +142,14 @@ jobs:
     - name: 上傳 symbols
       uses: actions/upload-artifact@v5
       with:
-        name: symbols-${{ env.commit }}
+        name: symbols-${{ env.commit }}.zip
         path: |
           patch-loader/build/symbols
 
     - name: 上傳 Manager APK
       uses: actions/upload-artifact@v5
       with:
-        name: npatch-manager-${{ env.commit }}
+        name: npatch-manager-${{ env.commit }}.zip
         path: |
           manager/build/outputs/apk/**/*.apk
         retention-days: 14
