@@ -21,8 +21,10 @@ android {
         applicationId = defaultManagerPackageName
     }
 
-    androidResources {
-        noCompress.add(".so")
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     buildTypes {
@@ -90,9 +92,9 @@ afterEvaluate {
 
 dependencies {
     implementation(projects.patch)
-    implementation(projects.services.daemonService)
     implementation(projects.share.android)
     implementation(projects.share.java)
+    implementation("vector:daemon-service")
 
     implementation(platform(npatch.androidx.compose.bom))
     implementation(npatch.androidx.activity.compose)

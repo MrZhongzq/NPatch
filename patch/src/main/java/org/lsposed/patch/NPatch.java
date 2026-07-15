@@ -82,8 +82,8 @@ public class NPatch {
     @Parameter(names = {"-d", "--debuggable"}, description = "Set app to be debuggable")
     private boolean debuggableFlag = false;
 
-    @Parameter(names = {"-l", "--sigbypasslv"}, description = "Signature bypass level. 0 (disable), 1 (pm), 2 (pm+openat). default 0")
-    private int sigbypassLevel = 0;
+    @Parameter(names = {"-l", "--sigbypasslv"}, description = "Signature bypass level. 0 (disable), 1 (pm), 2 (pm+openat), 3 (pm+openat+IO Redirection), 4 (pm+openat+SVC). default 1")
+    private int sigbypassLevel = 1;
 
     @Parameter(names = {"--injectdex"}, description = "Inject directly the loader dex file into the original application package")
     private boolean injectDex = false;
@@ -278,7 +278,7 @@ public class NPatch {
             }
 
             String originalSignature = null;
-            if (sigbypassLevel > 0) {
+            if (sigbypassLevel > Constants.SIGBYPASS_LV_DISABLE) {
                 originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                 if (originalSignature == null || originalSignature.isEmpty()) {
                     throw new PatchError("get original signature failed");
@@ -477,9 +477,9 @@ public class NPatch {
 
         String targetPackage = (newPackage != null && !newPackage.isEmpty()) ? newPackage : originPackage;
 
-        if (overrideVersionCode)
-            property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.VERSION_CODE, 1));
-        if (minSdkVersion < 28)
+        if (minSdkVersion > 0)
+            property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, minSdkVersion));
+        else
             property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, 27));
         property.addApplicationAttribute(new AttributeItem(NodeValue.Application.DEBUGGABLE, debuggableFlag));
         property.addApplicationAttribute(new AttributeItem("appComponentFactory", PROXY_APP_COMPONENT_FACTORY));
@@ -488,23 +488,11 @@ public class NPatch {
         if (!targetPackage.equals(originPackage)) {
             property.addManifestAttribute(new AttributeItem(NodeValue.Manifest.PACKAGE, targetPackage).setNamespace(null));
         }
-        property.setPermissionMapper((type, permission) -> {
-            if (permission.startsWith(originPackage)) {
-                return permission.replaceFirst(originPackage, targetPackage);
-            }
-            if (permission.startsWith("android")
-                    || permission.startsWith("com.android")
-                    || permission.startsWith("com.google.android")) {
-                return permission;
-            }
-            return targetPackage + "_" + permission;
-        });
 
-        property.setAuthorityMapper(value -> {
-            if (value.startsWith(originPackage)) {
-                return value.replaceFirst(originPackage, targetPackage);
-            }
-            return targetPackage + "_" + value;
+        modules.forEach(module -> {
+            property.addMetaData(new ModificationProperty.MetaData("xposedmodule", "true"));
+            property.addMetaData(new ModificationProperty.MetaData("xposeddescription", "NPatch Embed Module"));
+            property.addMetaData(new ModificationProperty.MetaData("xposedminversion", "93"));
         });
 
         property.addMetaData(new ModificationProperty.MetaData("npatch", metadata));
@@ -531,6 +519,7 @@ public class NPatch {
         if (useManager)
             property.addUsesPermission("android.permission.QUERY_ALL_PACKAGES");
 
+        // 處理注入 Provider 的邏輯
         if (isInjectProvider){
             HashMap<String,String> providerMap = new HashMap<>();
             providerMap.put("name","bin.mt.file.content.MTDataFilesProvider");

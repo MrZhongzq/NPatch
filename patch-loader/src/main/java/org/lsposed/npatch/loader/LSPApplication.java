@@ -82,6 +82,16 @@ public class LSPApplication {
         }
     }
 
+    public static void log(String msg) {
+        Log.i(TAG, msg);
+        XposedBridge.log(TAG + ": " + msg);
+    }
+
+    public static void log(String msg, Throwable tr) {
+        Log.e(TAG, msg, tr);
+        XposedBridge.log(TAG + ": " + msg + "\n" + Log.getStackTraceString(tr));
+    }
+
     public static void onLoad() throws RemoteException, IOException {
         if (isIsolated()) {
             XLog.d(TAG, "Skip isolated process");
@@ -90,11 +100,11 @@ public class LSPApplication {
         activityThread = ActivityThread.currentActivityThread();
         var context = createLoadedApkWithContext();
         if (context == null) {
-            XLog.e(TAG, "Error when creating context");
+            log("Error when creating context");
             return;
         }
 
-        Log.d(TAG, "Initialize service client");
+        log("Initialize service client");
         ILSPApplicationService service = null;
 
         if (config.useManager) {
@@ -112,19 +122,19 @@ public class LSPApplication {
                 }
                 SharedPreferences shared = context.getSharedPreferences("npatch", Context.MODE_PRIVATE);
                 shared.edit().putString("modules", moduleArr.toString()).apply();
-                Log.i(TAG, "Success update module scope from Manager");
+                log("Success update module scope from Manager");
             } catch (Throwable e) {
-                Log.w(TAG, "Failed to connect to manager: " + e.getMessage());
+                log("Failed to connect to manager: " + e.getMessage());
                 service = null;
             }
         }
 
         if (service == null) {
             if (hasEmbeddedModules(context)) {
-                Log.i(TAG, "Using Integrated Service (Embedded Modules Found)");
+                log("Using Integrated Service (Embedded Modules Found)");
                 service = new IntegrApplicationService(context);
             } else {
-                Log.i(TAG, "Using NeoLocal Service (Cached Config)");
+                log("Using NeoLocal Service (Cached Config)");
                 service = new NeoLocalApplicationService(context);
             }
         }
@@ -141,20 +151,20 @@ public class LSPApplication {
         // WARN: Since it uses `XResource`, the following class should not be initialized
         // before forkPostCommon is invoke. Otherwise, you will get failure of XResources
 
-        Log.i(TAG, "Load modules");
+        log("Load modules");
         LSPLoader.initModules(appLoadedApk);
-        Log.i(TAG, "Modules initialized");
+        log("Modules initialized");
 
         switchAllClassLoader();
         SigBypass.doSigBypass(context, config.sigBypassLevel, cachedOriginalApkPath);
 
         // Activate GMS redirect if enabled (for Google apps with MicroG)
         if (config.useNPatchGms) {
-            Log.i(TAG, "Activating NPatch GMS redirect");
+            log("Activating NPatch GMS redirect");
             GmsRedirector.activate(context, config.originalSignature);
         }
 
-        Log.i(TAG, "NPatch bootstrap completed");
+        log("NPatch bootstrap completed");
     }
 
     private static Context createLoadedApkWithContext() {
@@ -175,8 +185,8 @@ public class LSPApplication {
                 Log.e(TAG, "Failed to load config file", e);
                 return null;
             }
-            Log.i(TAG, "Use manager: " + config.useManager);
-            Log.i(TAG, "Signature bypass level: " + config.sigBypassLevel);
+            log("Use manager: " + config.useManager);
+            log("Signature bypass level: " + config.sigBypassLevel);
 
             Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader);
             cachedOriginalApkPath = cacheApkPath.toString();
@@ -200,7 +210,7 @@ public class LSPApplication {
                         providerPath = null;
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to inject provider:" + Log.getStackTraceString(e));
+                    log("Failed to inject provider:" + Log.getStackTraceString(e));
                     providerPath = null;
                 }
             }
@@ -278,9 +288,9 @@ public class LSPApplication {
                 }
             } catch (Throwable ignored) {
             }
-            Log.i(TAG, "hooked app initialized: " + appLoadedApk);
+            log("hooked app initialized: " + appLoadedApk);
 
-            var context = (Context) XposedHelpers.callStaticMethod(Class.forName("android.app.ContextImpl"), "createAppContext", activityThread, stubLoadedApk);
+            var context = (Context) XposedHelpers.callStaticMethod(Class.forName("android.app.ContextImpl"), "createAppContext", activityThread, appLoadedApk);
             if (config.appComponentFactory != null) {
                 try {
                     context.getClassLoader().loadClass(config.appComponentFactory);
@@ -289,12 +299,12 @@ public class LSPApplication {
                     appInfo.appComponentFactory = null;
                 }
             }
-            Log.i(TAG, "createLoadedApkWithContext cost: " + (System.currentTimeMillis() - timeStart) + "ms");
+            log("createLoadedApkWithContext cost: " + (System.currentTimeMillis() - timeStart) + "ms");
 
             SigBypass.replaceApplication(appInfo.packageName, appInfo.sourceDir, appInfo.publicSourceDir);
             return context;
         } catch (Throwable e) {
-            Log.e(TAG, "createLoadedApk", e);
+            log("createLoadedApk", e);
             return null;
         }
     }

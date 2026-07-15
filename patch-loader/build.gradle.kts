@@ -23,6 +23,13 @@ android {
     externalNativeBuild {
         cmake {
             path("src/main/jni/CMakeLists.txt")
+            version = "3.31.6"
+        }
+    }
+
+    packaging {
+        dex {
+            useLegacyPackaging = true
         }
     }
     namespace = "org.lsposed.npatch.loader"
@@ -62,10 +69,10 @@ androidComponents.onVariants { variant ->
 }
 
 dependencies {
-    compileOnly(projects.hiddenapi.stubs)
-    implementation(projects.core)
-    implementation(projects.hiddenapi.bridge)
-    implementation(projects.services.daemonService)
+    compileOnly("vector:stubs")
+    implementation("vector:core")
+    implementation("vector:bridge")
+    implementation("vector:daemon-service")
     implementation(projects.share.android)
     implementation(projects.share.java)
 

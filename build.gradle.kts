@@ -26,7 +26,7 @@ buildscript {
 
 val commitCount = run {
     val repo = FileRepository(rootProject.file(".git"))
-    val refId = repo.refDatabase.exactRef("refs/remotes/origin/master").objectId!!
+    val refId = repo.refDatabase.exactRef("refs/remotes/origin/main").objectId!!
     Git(repo).log().add(refId).call().count()
 }
 
@@ -37,19 +37,19 @@ val (coreCommitCount, coreLatestTag) = FileRepositoryBuilder().setGitDir(rootPro
             val coreCommitCount =
                 git.log()
                     .add(repo.refDatabase.exactRef("HEAD").objectId)
-                    .call().count() + 4200
+                    .call().count()
             val ver = git.describe()
                 .setTags(true)
                 .setAbbrev(0).call().removePrefix("v")
             coreCommitCount to ver
         }
-    }.getOrNull() ?: (1 to "1.0")
+    }.getOrNull() ?: (3015 to "2.0")
 
 // sync from https://github.com/JingMartix/LSPosed/blob/master/build.gradle.kts
 val defaultManagerPackageName by extra("org.lsposed.npatch")
 val apiCode by extra(100)
 val verCode by extra(commitCount)
-val verName by extra("0.7.4")
+val verName by extra("0.8.0")
 val coreVerCode by extra(coreCommitCount)
 val coreVerName by extra(coreLatestTag)
 // Provider<String> extras required by upstream core/core/build.gradle.kts (Vector v2.0)
@@ -249,19 +249,5 @@ subprojects {
     }
     plugins.withId("com.android.library") {
         configureBaseExtension()
-    }
-}
-
-
-project(":core") {
-    afterEvaluate {
-        if (property("android") is LibraryExtension) {
-            val android = property("android") as LibraryExtension
-            android.run {
-                buildTypes {
-                    release { proguardFiles(rootProject.file("share/lspatch-rules.pro")) }
-                }
-            }
-        }
     }
 }
