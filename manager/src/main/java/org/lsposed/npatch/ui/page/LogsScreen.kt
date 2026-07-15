@@ -231,7 +231,7 @@ private suspend fun fetchLogs(timeRange: TimeRange, levels: Set<LogLevel>): List
             val levelFilter = levels.joinToString("") { it.tag }
             if (levelFilter.isEmpty()) return@withContext emptyList()
 
-            val cmd = mutableListOf("logcat", "-d", "-b", "main,system", "-v", "threadtime")
+            val cmd = mutableListOf("logcat", "-d", "-b", "main,system,crash", "-v", "threadtime")
             if (timeRange != TimeRange.ALL) {
                 val seconds = timeRange.millis / 1000
                 cmd.addAll(listOf("-T", "${seconds}s"))
@@ -252,6 +252,9 @@ private suspend fun fetchLogs(timeRange: TimeRange, levels: Set<LogLevel>): List
                             (trimmedTag.contains("NPatch", ignoreCase = true) ||
                              trimmedTag.contains("LSPosed", ignoreCase = true) ||
                              trimmedTag.contains("Xposed", ignoreCase = true) ||
+                             // "Vector" is the core framework's log tag (org.lsposed.lspd
+                             // Utils.LOG_TAG); without it every framework log was dropped.
+                             trimmedTag.contains("Vector", ignoreCase = true) ||
                              trimmedTag.contains("npatch", ignoreCase = true))) {
                             entries.add(LogEntry(timestamp, level, trimmedTag, message, line))
                         }

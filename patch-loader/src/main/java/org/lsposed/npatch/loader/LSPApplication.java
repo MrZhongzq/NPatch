@@ -322,16 +322,22 @@ public class LSPApplication {
                     .format(new java.util.Date());
             File logFile = new File(logDir, dateStr + ".log");
 
-            // Capture logcat for NPatch/LSPosed/Xposed tags in background
-            String[] cmd = {"logcat", "-v", "threadtime",
-                    "NPatch:*", "LSPosed-Bridge:*", "Xposed:*",
-                    "NPatch-SigBypass:*", "NPatch-GmsRedirect:*", "NPatch-MetaLoader:*",
-                    "*:S"};
+            // Capture the whole log of THIS process (framework "Vector"/"LSPosed-*"/"Xposed"
+            // tags, every loaded module's logs and the host app itself) regardless of tag.
+            //
+            // The previous tag whitelist ("NPatch:*", ... , "*:S") missed the core framework
+            // tag "Vector" and any module-defined tag, and reading the global logcat requires
+            // the READ_LOGS permission that a non-root patched app does not hold — so it would
+            // silently record almost nothing. Filtering by our own pid instead works without
+            // READ_LOGS (an app may always read its own process log) and keeps other processes'
+            // noise out.
+            int myPid = android.os.Process.myPid();
+            String[] cmd = {"logcat", "-v", "threadtime", "--pid", String.valueOf(myPid), "*:V"};
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile));
             pb.start();
-            Log.i(TAG, "Logcat capture started -> " + logFile.getAbsolutePath());
+            Log.i(TAG, "Logcat capture started (pid=" + myPid + ") -> " + logFile.getAbsolutePath());
         } catch (Throwable e) {
             Log.w(TAG, "Failed to start logcat capture", e);
         }
