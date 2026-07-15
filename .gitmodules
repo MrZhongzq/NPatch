@@ -5,4 +5,4 @@
 [submodule "core"]
 	path = core
 	url = https://github.com/MrZhongzq/LSPosed.git
-	branch = npatch-core
+	branch = npatch-core-102

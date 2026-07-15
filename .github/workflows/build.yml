@@ -47,7 +47,7 @@ jobs:
       uses: actions/checkout@main
       with:
         repository: MrZhongzq/api
-        ref: npatch-core
+        ref: npatch-102
         path: libxposed/api
 
     - name: 檢出 libxposed/service
