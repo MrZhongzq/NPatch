@@ -35,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +49,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public class NPatch {
 
@@ -91,6 +98,9 @@ public class NPatch {
     @Parameter(names = {"--provider"}, description = "Inject Provider to manager data files")
     private boolean isInjectProvider = false;
 
+    @Parameter(names = {"--mirror"}, description = "Enable manager-owned mirror sync for app data files")
+    private boolean isMirrorMode = false;
+
     @Parameter(names = {"--outputLog"}, description = "Output Log to Media")
     private boolean outputLog = true;
 
@@ -118,6 +128,7 @@ public class NPatch {
     private String packageName;
 
     private static final String ANDROID_MANIFEST_XML = "AndroidManifest.xml";
+    private static final Pattern DEX_ENTRY_PATTERN = Pattern.compile("^classes(\\d*)\\.dex$");
     private static final HashSet<String> ARCHES = new HashSet<>(Arrays.asList(
             "arm64-v8a",
             "x86_64"
@@ -245,12 +256,23 @@ public class NPatch {
 
         logger.i("Parsing original apk...");
 
-        boolean embedOriginal = sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
+        boolean embedOriginal = useManager || sigbypassLevel >= Constants.SIGBYPASS_LV_PM_OPENAT;
+        File embeddedOriginalApk = srcApkFile;
+        File tempEmbeddedOriginalApk = null;
+
+        boolean embedOriginMetaLoader = isInjectProvider || isMirrorMode;
+
+        if (embedOriginal && embedOriginMetaLoader) {
+            logger.i("Preparing provider-enabled origin apk...");
+            tempEmbeddedOriginalApk = buildProviderReadyOriginApk(srcApkFile);
+            embeddedOriginalApk = tempEmbeddedOriginalApk;
+        }
 
         try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
-             ZFile srcZFile = embedOriginal
-                     ? dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, srcApkFile, false)
-                     : ZFile.openReadOnly(srcApkFile)) {
+             ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
+            if (embedOriginal) {
+                dstZFile.addNestedZip((ignore) -> Constants.ORIGINAL_APK_ASSET_PATH, embeddedOriginalApk, false);
+            }
 
             // sign apk
             try {
@@ -337,7 +359,7 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, outputLog, newPackage, installerSource, useNPatchGms);
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms);
             final var configBytes = GSON.toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
@@ -368,14 +390,6 @@ public class NPatch {
                 }
             } catch (Throwable e) {
                 throw new PatchError("Error when adding dex", e);
-            }
-
-            if (isInjectProvider){
-                try (var is = getClass().getClassLoader().getResourceAsStream("assets/mtprovider.dex")) {
-                    dstZFile.add("assets/npatch/mtprovider.dex", is);
-                } catch (Throwable e) {
-                    throw new PatchError("Error when adding dex", e);
-                }
             }
 
             if (!useManager) {
@@ -447,8 +461,75 @@ public class NPatch {
 
             dstZFile.realign();
             logger.i("Writing apk...");
+        } finally {
+            if (tempEmbeddedOriginalApk != null && tempEmbeddedOriginalApk.exists() && !tempEmbeddedOriginalApk.delete()) {
+                logger.d("Failed to delete temporary provider-enabled origin apk: " + tempEmbeddedOriginalApk);
+            }
         }
         logger.i("Done. Output APK: " + outputFile.getAbsolutePath());
+    }
+
+    private File buildProviderReadyOriginApk(File srcApkFile) throws IOException {
+        byte[] providerDex;
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(Constants.META_LOADER_DEX_ASSET_PATH)) {
+            if (is == null) {
+                throw new IOException("Meta loader dex not found");
+            }
+            providerDex = is.readAllBytes();
+        }
+
+        File tempApk = File.createTempFile("npatch-origin-provider-", ".apk");
+        String nextDexName = findNextDexName(srcApkFile);
+
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(srcApkFile));
+             ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(tempApk))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[8192];
+            while ((entry = zis.getNextEntry()) != null) {
+                ZipEntry outEntry = new ZipEntry(entry.getName());
+                outEntry.setMethod(entry.getMethod());
+                if (entry.getMethod() == ZipEntry.STORED) {
+                    outEntry.setSize(entry.getSize());
+                    outEntry.setCompressedSize(entry.getCompressedSize());
+                    outEntry.setCrc(entry.getCrc());
+                }
+                outEntry.setTime(entry.getTime());
+                zos.putNextEntry(outEntry);
+                int read;
+                while ((read = zis.read(buffer)) != -1) {
+                    zos.write(buffer, 0, read);
+                }
+                zos.closeEntry();
+                zis.closeEntry();
+            }
+
+            ZipEntry providerEntry = new ZipEntry(nextDexName);
+            zos.putNextEntry(providerEntry);
+            zos.write(providerDex);
+            zos.closeEntry();
+        }
+
+        return tempApk;
+    }
+
+    private String findNextDexName(File apkFile) throws IOException {
+        int maxDexIndex = 1;
+        try (ZipFile zipFile = new ZipFile(apkFile)) {
+            var entries = zipFile.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                Matcher matcher = DEX_ENTRY_PATTERN.matcher(entry.getName());
+                if (!matcher.matches()) {
+                    continue;
+                }
+                String digits = matcher.group(1);
+                int index = digits == null || digits.isEmpty() ? 1 : Integer.parseInt(digits);
+                if (index > maxDexIndex) {
+                    maxDexIndex = index;
+                }
+            }
+        }
+        return "classes" + (maxDexIndex + 1) + ".dex";
     }
 
     private void embedModules(ZFile zFile) {
@@ -523,13 +604,22 @@ public class NPatch {
         if (isInjectProvider){
             HashMap<String,String> providerMap = new HashMap<>();
             providerMap.put("name","bin.mt.file.content.MTDataFilesProvider");
-            providerMap.put("permission","android.permission.MANAGE_DOCUMENTS");
             providerMap.put("exported","true");
             providerMap.put("authorities", targetPackage + ".MTDataFilesProvider");
             providerMap.put("grantUriPermissions","true");
 
             property.addProvider(providerMap,"android.content.action.DOCUMENTS_PROVIDER");
 
+        }
+
+        if (isMirrorMode) {
+            HashMap<String, String> providerMap = new HashMap<>();
+            providerMap.put("name", "org.lsposed.npatch.metaloader.NPatchDataProvider");
+            providerMap.put("exported", "true");
+            providerMap.put("authorities", targetPackage + ".NPatchDataProvider");
+            providerMap.put("grantUriPermissions", "true");
+
+            property.addProvider(providerMap, "org.lsposed.npatch.action.DATA_MIRROR");
         }
 
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {

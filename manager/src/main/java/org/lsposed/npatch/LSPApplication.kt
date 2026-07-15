@@ -35,10 +35,11 @@ class LSPApplication : Application() {
         prefs = lspApp.getSharedPreferences("settings", Context.MODE_PRIVATE)
         ShizukuApi.init()
         AppBroadcastReceiver.register(this)
-        if (Configs.keepAlive) {
-            KeepAliveService.start(this)
+        KeepAliveService.refresh(this)
+        globalScope.launch {
+            NPackageManager.fetchAppList()
+            KeepAliveService.refresh(this@LSPApplication)
         }
-        globalScope.launch { NPackageManager.fetchAppList() }
     }
 
 }

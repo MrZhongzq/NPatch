@@ -373,6 +373,13 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             desc = stringResource(R.string.patch_inject_mt_provider_desc)
         )
         SettingsCheckBox(
+            modifier = Modifier.clickable { viewModel.mirrorMode = !viewModel.mirrorMode },
+            checked = viewModel.mirrorMode,
+            icon = Icons.Outlined.FolderCopy,
+            title = stringResource(R.string.patch_enable_mirror_mode),
+            desc = stringResource(R.string.patch_enable_mirror_mode_desc)
+        )
+        SettingsCheckBox(
             modifier = Modifier.clickable { viewModel.outputLog = !viewModel.outputLog },
             checked = viewModel.outputLog,
             icon = Icons.Outlined.AddCard,

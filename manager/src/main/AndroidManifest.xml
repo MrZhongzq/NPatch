@@ -19,6 +19,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:name=".LSPApplication"
@@ -69,6 +70,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".manager.BootCompletedReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
 
         <service
             android:name=".manager.ModuleService"
@@ -109,5 +119,13 @@
             android:exported="true"
             android:enabled="true" />
 
+        <receiver
+            android:name=".manager.MiPushFallbackReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.lsposed.npatch.action.POST_MIPUSH_FALLBACK" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

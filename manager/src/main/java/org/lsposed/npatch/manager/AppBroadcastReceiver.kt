@@ -34,6 +34,7 @@ class AppBroadcastReceiver : BroadcastReceiver() {
             lspApp.globalScope.launch {
                 Log.i(TAG, "Received intent: $intent")
                 NPackageManager.fetchAppList()
+                KeepAliveService.refresh(context)
             }
         }
     }

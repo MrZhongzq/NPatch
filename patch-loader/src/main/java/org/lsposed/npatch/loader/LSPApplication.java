@@ -1,8 +1,6 @@
 package org.lsposed.npatch.loader;
 
 import static org.lsposed.npatch.share.Constants.CONFIG_ASSET_PATH;
-import static org.lsposed.npatch.share.Constants.PROVIDER_DEX_ASSET_PATH;
-
 import android.app.ActivityThread;
 import android.app.LoadedApk;
 import android.content.Context;
@@ -32,12 +30,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -188,84 +183,17 @@ public class LSPApplication {
             log("Use manager: " + config.useManager);
             log("Signature bypass level: " + config.sigBypassLevel);
 
-            Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader);
+            // data-fixed embeds the provider dex into the cached origin apk inside
+            // prepareOriginApk(injectProvider) — no separate runtime dex injection needed.
+            Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader, config.injectProvider);
             cachedOriginalApkPath = cacheApkPath.toString();
-            long sourceCrc = OriginApkHelper.getOriginalApkCrc(appInfo.sourceDir);
-
             appInfo.sourceDir = cacheApkPath.toString();
             appInfo.publicSourceDir = cacheApkPath.toString();
             appInfo.appComponentFactory = config.appComponentFactory;
 
-            Path providerPath = null;
-            if (config.injectProvider) {
-                providerPath = cacheApkPath.getParent().resolve("p_" + sourceCrc + ".dex");
-                try {
-                    Files.deleteIfExists(providerPath);
-                    try (InputStream is = baseClassLoader.getResourceAsStream(PROVIDER_DEX_ASSET_PATH)) {
-                        if (is != null) Files.copy(is, providerPath);
-                    }
-                    if (Files.exists(providerPath)) {
-                        providerPath.toFile().setWritable(false);
-                    } else {
-                        providerPath = null;
-                    }
-                } catch (Exception e) {
-                    log("Failed to inject provider:" + Log.getStackTraceString(e));
-                    providerPath = null;
-                }
-            }
-
             var mPackages = (Map<?, ?>) XposedHelpers.getObjectField(activityThread, "mPackages");
             mPackages.remove(appInfo.packageName);
             appLoadedApk = activityThread.getPackageInfoNoCheck(appInfo, compatInfo);
-
-            if (config.injectProvider && providerPath != null) {
-                try {
-                    ClassLoader loader = appLoadedApk.getClassLoader();
-                    Object dexPathList = XposedHelpers.getObjectField(loader, "pathList");
-                    Object dexElements = XposedHelpers.getObjectField(dexPathList, "dexElements");
-                    int length = Array.getLength(dexElements);
-                    Object newElements = Array.newInstance(dexElements.getClass().getComponentType(), length + 1);
-                    System.arraycopy(dexElements, 0, newElements, 0, length);
-
-                    Object element = null;
-                    // Try DexFile approach first (works on most Android versions)
-                    try {
-                        Class<?> dexFileClass = Class.forName("dalvik.system.DexFile");
-                        Object dexFile = dexFileClass.getConstructor(String.class).newInstance(providerPath.toString());
-                        Class<?> elementClass = Class.forName("dalvik.system.DexPathList$Element");
-                        element = elementClass.getConstructor(dexFileClass).newInstance(dexFile);
-                    } catch (Throwable e1) {
-                        Log.w(TAG, "DexFile approach failed, trying DexPathList.makeDexElements: " + e1.getMessage());
-                        // Fallback: use DexPathList.makeDexElements on Android 14+
-                        try {
-                            java.lang.reflect.Method makeDexElements = dexPathList.getClass().getDeclaredMethod(
-                                    "makeDexElements", List.class, File.class, List.class, ClassLoader.class);
-                            makeDexElements.setAccessible(true);
-                            List<File> files = new ArrayList<>();
-                            files.add(providerPath.toFile());
-                            List<IOException> suppressedExceptions = new ArrayList<>();
-                            Object[] elements = (Object[]) makeDexElements.invoke(null,
-                                    files, null, suppressedExceptions, loader);
-                            if (elements != null && elements.length > 0) {
-                                element = elements[0];
-                            }
-                        } catch (Throwable e2) {
-                            Log.e(TAG, "makeDexElements fallback also failed: " + e2.getMessage());
-                        }
-                    }
-
-                    if (element != null) {
-                        Array.set(newElements, length, element);
-                        XposedHelpers.setObjectField(dexPathList, "dexElements", newElements);
-                        Log.i(TAG, "Provider dex injected successfully");
-                    } else {
-                        Log.e(TAG, "Failed to create DexPathList element for provider");
-                    }
-                } catch (Throwable e) {
-                    Log.e(TAG, "Failed to inject provider dex: " + e.getMessage(), e);
-                }
-            }
 
             XposedHelpers.setObjectField(mBoundApplication, "info", appLoadedApk);
 
