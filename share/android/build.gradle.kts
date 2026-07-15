@@ -12,5 +12,5 @@ android {
 }
 
 dependencies {
-    implementation("vector:daemon-service")
+    implementation(projects.services.daemonService)
 }

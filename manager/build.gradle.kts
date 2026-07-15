@@ -94,7 +94,7 @@ dependencies {
     implementation(projects.patch)
     implementation(projects.share.android)
     implementation(projects.share.java)
-    implementation("vector:daemon-service")
+    implementation(projects.services.daemonService)
 
     implementation(platform(npatch.androidx.compose.bom))
     implementation(npatch.androidx.activity.compose)

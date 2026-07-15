@@ -69,10 +69,10 @@ androidComponents.onVariants { variant ->
 }
 
 dependencies {
-    compileOnly("vector:stubs")
-    implementation("vector:core")
-    implementation("vector:bridge")
-    implementation("vector:daemon-service")
+    compileOnly(projects.hiddenapi.stubs)
+    implementation(projects.core)
+    implementation(projects.hiddenapi.bridge)
+    implementation(projects.services.daemonService)
     implementation(projects.share.android)
     implementation(projects.share.java)
 

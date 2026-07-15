@@ -42,7 +42,7 @@ androidComponents.onVariants { variant ->
 }
 
 dependencies {
-    compileOnly("vector:stubs")
+    compileOnly(projects.hiddenapi.stubs)
     implementation(projects.share.java)
     implementation(libs.hiddenapibypass)
 }
