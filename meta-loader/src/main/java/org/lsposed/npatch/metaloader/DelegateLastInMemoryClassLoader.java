@@ -22,7 +22,10 @@ import hidden.ByteBufferDexClassLoader;
 public final class DelegateLastInMemoryClassLoader extends ByteBufferDexClassLoader {
 
     public DelegateLastInMemoryClassLoader(ByteBuffer[] dexFiles, ClassLoader parent) {
-        super(dexFiles, parent);
+        // Use the 3-arg (ByteBuffer[], librarySearchPath, ClassLoader) BaseDexClassLoader
+        // constructor — the 2-arg one is absent on current Android (as VectorModuleClassLoader
+        // also does). No native libraries are loaded from the framework dex, so pass null.
+        super(dexFiles, null, parent);
     }
 
     @Override
