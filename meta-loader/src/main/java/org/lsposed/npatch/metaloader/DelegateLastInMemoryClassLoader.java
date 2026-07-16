@@ -32,7 +32,10 @@ public final class DelegateLastInMemoryClassLoader extends ClassLoader {
 
     @Override
     protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-        synchronized (getClassLoadingLock(name)) {
+        // Equivalent to the default ClassLoader lock for a non-parallel-capable loader
+        // (getClassLoadingLock returns `this`); avoided directly as it is not visible under the
+        // metaloader's hidden-api stub classpath.
+        synchronized (this) {
             Class<?> c = findLoadedClass(name);
 
             if (c == null) {
