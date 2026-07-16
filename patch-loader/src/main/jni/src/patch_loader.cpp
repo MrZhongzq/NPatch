@@ -35,6 +35,8 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <string>
 
 using namespace lsplant;
 
@@ -60,25 +62,43 @@ namespace vector::native {
             return;
         }
 
-        auto dex_buffer = env->NewDirectByteBuffer(dex.data(), dex.size());
-
         // The loader dex bundles its own kotlin-stdlib. A plain InMemoryDexClassLoader delegates
         // to its parent (the host app class loader) first, so a host app shipping an older /
         // incompatible kotlin-stdlib shadows the framework's classes and crashes it (e.g.
-        // NoSuchFieldError kotlin.Result$Companion). DelegateLastInMemoryClassLoader (bundled in
-        // the metaloader dex) resolves boot -> self -> parent, keeping the framework on its OWN
-        // kotlin while it can still reach the host app through the parent.
-        auto delegate_last_classloader = FindClassFromLoader(
-                env, stub_classloader.get(), "org.lsposed.npatch.metaloader.DelegateLastInMemoryClassLoader");
-        if (!delegate_last_classloader) {
-            LOGE("DelegateLastInMemoryClassLoader class not found!!!");
+        // NoSuchFieldError kotlin.Result$Companion). DelegateLastClassLoader resolves
+        // boot -> self -> parent, keeping the framework on its OWN kotlin while it can still reach
+        // the host app through the parent, and — unlike a hand-rolled wrapper — it is a real
+        // BaseDexClassLoader (exposes the `pathList` field the framework introspects). It has no
+        // in-memory constructor, so spill the dex to the app cache first.
+        auto mid_current_package_name = JNI_GetStaticMethodID(env, class_activity_thread, "currentPackageName", "()Ljava/lang/String;");
+        auto package_name = JNI_CallStaticObjectMethod(env, class_activity_thread, mid_current_package_name);
+        if (!package_name) {
+            LOGE("currentPackageName returned null!!!");
             return;
         }
-        auto mid_init = JNI_GetMethodID(env, delegate_last_classloader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
+        const char* package_name_chars = env->GetStringUTFChars(static_cast<jstring>(package_name.get()), nullptr);
+        std::string dex_path = std::string("/data/user/0/") + package_name_chars + "/cache/npatch-loader-" + std::to_string(getpid()) + ".dex";
+        env->ReleaseStringUTFChars(static_cast<jstring>(package_name.get()), package_name_chars);
 
-        ScopedLocalRef<jobject> my_cl(JNI_NewObject(env, delegate_last_classloader, mid_init, dex_buffer, stub_classloader));
+        int dex_fd = open(dex_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (dex_fd < 0) {
+            LOGE("Failed to open loader dex file for writing: %s", dex_path.c_str());
+            return;
+        }
+        if (write(dex_fd, dex.data(), dex.size()) != static_cast<ssize_t>(dex.size())) {
+            LOGE("Failed to write loader dex file!!!");
+            close(dex_fd);
+            return;
+        }
+        close(dex_fd);
+
+        auto delegate_last_classloader = JNI_FindClass(env, "dalvik/system/DelegateLastClassLoader");
+        auto mid_init = JNI_GetMethodID(env, delegate_last_classloader, "<init>", "(Ljava/lang/String;Ljava/lang/ClassLoader;)V");
+        auto j_dex_path = env->NewStringUTF(dex_path.c_str());
+
+        ScopedLocalRef<jobject> my_cl(JNI_NewObject(env, delegate_last_classloader, mid_init, j_dex_path, stub_classloader));
         if (!my_cl) {
-            LOGE("DelegateLastInMemoryClassLoader creation failed!!!");
+            LOGE("DelegateLastClassLoader creation failed!!!");
             return;
         }
 
