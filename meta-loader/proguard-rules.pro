@@ -2,6 +2,10 @@
     public static byte[] dex;
     <init>();
 }
+# Instantiated only from native (patch_loader.cpp) — keep class + constructor from R8.
+-keep class org.lsposed.npatch.metaloader.DelegateLastInMemoryClassLoader {
+    <init>(java.nio.ByteBuffer, java.lang.ClassLoader);
+}
 -keep class bin.mt.file.content.MTDataFilesProvider {
     <init>();
 }
