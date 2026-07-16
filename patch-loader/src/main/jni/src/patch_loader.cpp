@@ -60,28 +60,22 @@ namespace vector::native {
             return;
         }
 
-        // The loader dex bundles its own kotlin-stdlib. A plain InMemoryDexClassLoader delegates
-        // to its parent (the host app class loader) first, so a host app shipping an older /
-        // incompatible kotlin-stdlib shadows the framework's classes and crashes it (e.g.
-        // NoSuchFieldError kotlin.Result$Companion). DelegateLastInMemoryClassLoader (bundled in
-        // the metaloader dex) is a real BaseDexClassLoader — it keeps the dex in memory (Android
-        // blocks executing dex from a writable path) AND exposes the `pathList` field the
-        // framework introspects — and resolves boot -> self -> parent, keeping the framework on
-        // its OWN kotlin while it can still reach the host app through the parent.
-        auto delegate_last_classloader = FindClassFromLoader(
-                env, stub_classloader.get(), "org.lsposed.npatch.metaloader.DelegateLastInMemoryClassLoader");
-        if (!delegate_last_classloader) {
-            LOGE("DelegateLastInMemoryClassLoader class not found!!!");
-            return;
-        }
-        auto mid_init = JNI_GetMethodID(env, delegate_last_classloader, "<init>", "([Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
-        auto byte_buffer_class = JNI_FindClass(env, "java/nio/ByteBuffer");
+        // The loader dex bundles its own kotlin-stdlib. If the injection loader delegates to the
+        // host app class loader first, an app shipping an older / incompatible kotlin-stdlib
+        // shadows the framework's classes and crashes it (e.g. NoSuchFieldError
+        // kotlin.Result$Companion). We therefore give the InMemoryDexClassLoader the BOOT class
+        // loader as parent (null) instead of the app's: the framework then resolves its OWN kotlin
+        // (boot has none, so its own dex wins) while still being a real BaseDexClassLoader that
+        // exposes the `pathList` field the framework introspects. The framework and modules reach
+        // host app classes through explicit class loaders (lpparam.classLoader / reflection), not
+        // through this loader's parent, so isolating it from the app here is safe.
+        auto in_memory_classloader = JNI_FindClass(env, "dalvik/system/InMemoryDexClassLoader");
+        auto mid_init = JNI_GetMethodID(env, in_memory_classloader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
         auto dex_buffer = env->NewDirectByteBuffer(dex.data(), dex.size());
-        auto dex_array = env->NewObjectArray(1, byte_buffer_class.get(), dex_buffer);
 
-        ScopedLocalRef<jobject> my_cl(JNI_NewObject(env, delegate_last_classloader, mid_init, dex_array, stub_classloader));
+        ScopedLocalRef<jobject> my_cl(JNI_NewObject(env, in_memory_classloader, mid_init, dex_buffer, nullptr));
         if (!my_cl) {
-            LOGE("DelegateLastInMemoryClassLoader creation failed!!!");
+            LOGE("InMemoryDexClassLoader creation failed!!!");
             return;
         }
 

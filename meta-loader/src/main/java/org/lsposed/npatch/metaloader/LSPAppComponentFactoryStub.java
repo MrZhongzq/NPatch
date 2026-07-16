@@ -47,11 +47,6 @@ public class LSPAppComponentFactoryStub extends AppComponentFactory {
 
     private static void bootstrap() {
         try {
-            // Exempt hidden APIs before the native loader runs: it builds the framework's
-            // injection class loader through the hidden BaseDexClassLoader(ByteBuffer[], parent)
-            // constructor (see DelegateLastInMemoryClassLoader).
-            HiddenApiBypass.addHiddenApiExemptions("L");
-
             archToLib.put("arm64", "arm64-v8a");
             archToLib.put("x86_64", "x86_64");
 
