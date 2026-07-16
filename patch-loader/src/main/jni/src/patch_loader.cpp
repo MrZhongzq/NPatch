@@ -62,32 +62,23 @@ namespace vector::native {
 
         auto dex_buffer = env->NewDirectByteBuffer(dex.data(), dex.size());
 
-        // The loader dex bundles its own kotlin-stdlib. Loading it with an ordinary
-        // InMemoryDexClassLoader (parent-first delegation) lets the host app's — possibly
-        // older and incompatible — kotlin.* classes shadow ours, crashing the framework with
-        // e.g. NoSuchFieldError kotlin.Result$Companion. DelegateLastClassLoader resolves
-        // boot -> self -> parent, so the framework uses its OWN kotlin while still seeing the
-        // host app through the parent. Its ByteBuffer[] constructor exists since API 31; on
-        // older releases fall back to the in-memory (parent-first) loader.
-        auto class_build_version = JNI_FindClass(env, "android/os/Build$VERSION");
-        auto fid_sdk_int = JNI_GetStaticFieldID(env, class_build_version, "SDK_INT", "I");
-        jint sdk_int = env->GetStaticIntField(class_build_version.get(), fid_sdk_int);
+        // The loader dex bundles its own kotlin-stdlib. A plain InMemoryDexClassLoader delegates
+        // to its parent (the host app class loader) first, so a host app shipping an older /
+        // incompatible kotlin-stdlib shadows the framework's classes and crashes it (e.g.
+        // NoSuchFieldError kotlin.Result$Companion). DelegateLastInMemoryClassLoader (bundled in
+        // the metaloader dex) resolves boot -> self -> parent, keeping the framework on its OWN
+        // kotlin while it can still reach the host app through the parent.
+        auto delegate_last_classloader = FindClassFromLoader(
+                env, stub_classloader.get(), "org.lsposed.npatch.metaloader.DelegateLastInMemoryClassLoader");
+        if (!delegate_last_classloader) {
+            LOGE("DelegateLastInMemoryClassLoader class not found!!!");
+            return;
+        }
+        auto mid_init = JNI_GetMethodID(env, delegate_last_classloader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
 
-        auto my_cl = [&]() -> ScopedLocalRef<jobject> {
-            if (sdk_int >= 31) {
-                auto delegate_last_classloader = JNI_FindClass(env, "dalvik/system/DelegateLastClassLoader");
-                auto mid_init = JNI_GetMethodID(env, delegate_last_classloader, "<init>", "([Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
-                auto byte_buffer_class = JNI_FindClass(env, "java/nio/ByteBuffer");
-                auto dex_array = env->NewObjectArray(1, byte_buffer_class.get(), dex_buffer);
-                return JNI_NewObject(env, delegate_last_classloader, mid_init, dex_array, stub_classloader);
-            } else {
-                auto in_memory_classloader = JNI_FindClass(env, "dalvik/system/InMemoryDexClassLoader");
-                auto mid_init = JNI_GetMethodID(env, in_memory_classloader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
-                return JNI_NewObject(env, in_memory_classloader, mid_init, dex_buffer, stub_classloader);
-            }
-        }();
+        ScopedLocalRef<jobject> my_cl(JNI_NewObject(env, delegate_last_classloader, mid_init, dex_buffer, stub_classloader));
         if (!my_cl) {
-            LOGE("inject classloader creation failed!!!");
+            LOGE("DelegateLastInMemoryClassLoader creation failed!!!");
             return;
         }
 
