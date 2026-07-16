@@ -12,15 +12,22 @@ import java.nio.ByteBuffer;
  * host app that ships an older / incompatible kotlin-stdlib shadows the framework's classes and
  * crashes it (e.g. {@code NoSuchFieldError kotlin.Result$Companion}).
  *
- * <p>{@code dalvik.system.DelegateLastClassLoader} would give the behaviour we want, but it has no
- * in-memory (ByteBuffer) constructor, so we replicate its lookup order here:
- * already-loaded &rarr; boot classpath &rarr; this dex &rarr; parent. This keeps the framework on
- * its OWN kotlin while it can still reach the host app through the parent.
+ * <p>{@code dalvik.system.DelegateLastClassLoader} has the delegation order we want but no
+ * in-memory (ByteBuffer) constructor, and {@link InMemoryDexClassLoader} is {@code final} so it
+ * cannot be subclassed. We therefore wrap an in-memory loader whose parent is the boot class
+ * loader (so it only ever serves boot classes and our own dex) and resolve as:
+ * already-loaded &rarr; boot + framework dex &rarr; host app. This keeps the framework on its OWN
+ * kotlin while it can still reach the host app through the parent.
  */
-public final class DelegateLastInMemoryClassLoader extends InMemoryDexClassLoader {
+public final class DelegateLastInMemoryClassLoader extends ClassLoader {
+
+    private final ClassLoader dexLoader;
 
     public DelegateLastInMemoryClassLoader(ByteBuffer dexBuffer, ClassLoader parent) {
-        super(dexBuffer, parent);
+        super(parent);
+        // parent = null -> boot class loader, so this delegate never resolves host app classes,
+        // only the boot classpath and the framework's own dex (incl. its kotlin-stdlib).
+        this.dexLoader = new InMemoryDexClassLoader(dexBuffer, null);
     }
 
     @Override
@@ -29,23 +36,15 @@ public final class DelegateLastInMemoryClassLoader extends InMemoryDexClassLoade
             Class<?> c = findLoadedClass(name);
 
             if (c == null) {
-                // 1. Boot classpath (android.*, java.*, ...). Object's loader is the boot loader.
+                // 1. Boot classpath + the framework's own dex (never the host app).
                 try {
-                    c = Class.forName(name, false, Object.class.getClassLoader());
+                    c = dexLoader.loadClass(name);
                 } catch (ClassNotFoundException ignored) {
                 }
             }
 
             if (c == null) {
-                // 2. This loader's own dex (the framework, incl. its own kotlin-stdlib).
-                try {
-                    c = findClass(name);
-                } catch (ClassNotFoundException ignored) {
-                }
-            }
-
-            if (c == null) {
-                // 3. Parent (the host app class loader).
+                // 2. The host app class loader.
                 c = getParent().loadClass(name);
             }
 
