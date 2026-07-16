@@ -34,7 +34,8 @@
     <string name="manage_loading">正在加載</string>
     <string name="manage_no_apps">還沒有打包的應用程式</string>
     <string name="manage_rolling">滾動</string>
-    <string name="manage_update_loader">更新載入程式</string>
+    <string name="manage_update_loader">重新修補</string>
+    <string name="manage_incompatible_warning">舊版修補，可能不相容，建議重新修補</string>
     <string name="manage_update_loader_successfully">更新成功</string>
     <string name="manage_update_loader_failed">更新失敗</string>
     <string name="manage_module_scope">模組作用域</string>

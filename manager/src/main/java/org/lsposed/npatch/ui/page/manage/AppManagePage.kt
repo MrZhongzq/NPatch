@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardCapslock
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -162,42 +162,58 @@ fun AppManageBody(
                                 label = appInfo.label,
                                 packageName = appInfo.app.packageName,
                                 additionalContent = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        val patchText = if (patchConfig.useManager) {
-                                            stringResource(R.string.patch_local)
-                                        } else {
-                                            stringResource(R.string.patch_integrated)
-                                        }
-                                        val patchColor = if (patchConfig.useManager) {
-                                            MaterialTheme.colorScheme.secondary
-                                        } else {
-                                            MaterialTheme.colorScheme.tertiary
-                                        }
-                                        val versionText = if (isRolling) {
-                                            stringResource(R.string.manage_rolling)
-                                        } else {
-                                            patchConfig.lspConfig.VERSION_CODE.toString()
-                                        }
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            val patchText = if (patchConfig.useManager) {
+                                                stringResource(R.string.patch_local)
+                                            } else {
+                                                stringResource(R.string.patch_integrated)
+                                            }
+                                            val patchColor = if (patchConfig.useManager) {
+                                                MaterialTheme.colorScheme.secondary
+                                            } else {
+                                                MaterialTheme.colorScheme.tertiary
+                                            }
+                                            val versionText = if (isRolling) {
+                                                stringResource(R.string.manage_rolling)
+                                            } else {
+                                                patchConfig.lspConfig.VERSION_CODE.toString()
+                                            }
 
-                                        Text(
-                                            text = "$patchText  $versionText",
-                                            color = patchColor,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontFamily = FontFamily.Serif,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                        if (!patchConfig.installerSource.isNullOrEmpty() && patchConfig.installerSource != "Unknown") {
-                                            Spacer(Modifier.width(8.dp))
                                             Text(
-                                                text = patchConfig.installerSource,
-                                                color = MaterialTheme.colorScheme.outline,
-                                                style = MaterialTheme.typography.labelSmall
+                                                text = "$patchText  $versionText",
+                                                color = patchColor,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontFamily = FontFamily.Serif,
+                                                style = MaterialTheme.typography.bodySmall
                                             )
+                                            if (!patchConfig.installerSource.isNullOrEmpty() && patchConfig.installerSource != "Unknown") {
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = patchConfig.installerSource,
+                                                    color = MaterialTheme.colorScheme.outline,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
                                         }
+                                        // 旧版修补的不兼容警告(点整项后可在菜单里"重新修补")
                                         if (canUpdateLoader) {
-                                            with(LocalDensity.current) {
-                                                val size = MaterialTheme.typography.bodySmall.fontSize * 1.2
-                                                Icon(Icons.Filled.KeyboardCapslock, null, Modifier.size(size.toDp()))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                with(LocalDensity.current) {
+                                                    val size = MaterialTheme.typography.labelSmall.fontSize * 1.2
+                                                    Icon(
+                                                        Icons.Filled.Warning,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(size.toDp())
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = stringResource(R.string.manage_incompatible_warning),
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
                                             }
                                         }
                                     }

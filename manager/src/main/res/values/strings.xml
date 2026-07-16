@@ -35,7 +35,8 @@
     <string name="manage_loading">Loading</string>
     <string name="manage_no_apps">No patched apps yet</string>
     <string name="manage_rolling">Rolling</string>
-    <string name="manage_update_loader">Update loader</string>
+    <string name="manage_update_loader">Re-patch</string>
+    <string name="manage_incompatible_warning">Old patch — may be incompatible, re-patch recommended</string>
     <string name="manage_update_loader_successfully">Update successfully</string>
     <string name="manage_update_loader_failed">Update failed</string>
     <string name="manage_module_scope">Module scope</string>
