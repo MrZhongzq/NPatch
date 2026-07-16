@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,7 +29,17 @@ class KeepAliveService : Service() {
         private const val MIRROR_SYNC_INTERVAL_MS = 30_000L
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, KeepAliveService::class.java))
+            try {
+                context.startForegroundService(Intent(context, KeepAliveService::class.java))
+            } catch (e: Throwable) {
+                // startForegroundService() is disallowed when the manager process is cold-started
+                // in the background — e.g. an embedded-mode patched app querying our ConfigProvider
+                // boots this Application in the background, where Android 12+ throws
+                // ForegroundServiceStartNotAllowedException. KeepAlive is best-effort; it will be
+                // (re)started when the user opens the app or on boot, so just swallow it here
+                // instead of crashing the whole manager process.
+                Log.w("NPatch-KeepAlive", "Unable to start KeepAliveService from background", e)
+            }
         }
 
         fun stop(context: Context) {
