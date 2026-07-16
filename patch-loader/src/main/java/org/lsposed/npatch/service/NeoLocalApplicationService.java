@@ -31,10 +31,18 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
 
     public NeoLocalApplicationService(Context context) {
         cachedModule = Collections.synchronizedList(new ArrayList<>());
-        loadModulesFromProvider(context);
+        boolean providerAvailable = loadModulesFromProvider(context);
 
-        if (cachedModule.isEmpty()) {
-            Log.w(TAG, "NeoLocal: Provider returned empty, falling back to local cache.");
+        // Only fall back to the local cache when the Manager Provider is genuinely
+        // unreachable (process gone / uninstalled). If the provider IS reachable but
+        // returns 0 modules, that means the user disabled all modules for this app —
+        // respect that instead of resurrecting a stale cached scope.
+        //
+        // This is the decoupling that lets injection survive an unavailable manager:
+        // every reachable query refreshes the cache (see updateModulesCache), so the
+        // patched app keeps a fresh, self-sufficient module list to load from.
+        if (!providerAvailable && cachedModule.isEmpty()) {
+            Log.w(TAG, "NeoLocal: Provider unavailable, falling back to local cache.");
             loadModulesFromCache(context);
         }
     }
@@ -77,9 +85,10 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         }
     }
 
-    private void loadModulesFromProvider(Context context) {
+    private boolean loadModulesFromProvider(Context context) {
         PackageManager pm = context.getPackageManager();
         String myPackageName = context.getPackageName();
+        JSONArray cacheArray = new JSONArray();
 
         Uri queryUri = PROVIDER_URI.buildUpon()
                 .appendQueryParameter("package", myPackageName)
@@ -88,21 +97,34 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         try (Cursor cursor = context.getContentResolver().query(queryUri, null, null, null, null)) {
             if (cursor == null) {
                 Log.w(TAG, "NeoLocal: Cannot reach Manager Provider.");
-                return;
+                return false;
             }
 
             while (cursor.moveToNext()) {
                 int colIndex = cursor.getColumnIndex("packageName");
                 if (colIndex != -1) {
-                    loadSingleModule(pm, cursor.getString(colIndex));
+                    String packageName = cursor.getString(colIndex);
+                    String apkPath = loadSingleModule(pm, packageName);
+                    if (apkPath != null) {
+                        JSONObject moduleObj = new JSONObject();
+                        moduleObj.put("path", apkPath);
+                        moduleObj.put("packageName", packageName);
+                        cacheArray.put(moduleObj);
+                    }
                 }
             }
+            // Refresh the self-sufficient local cache with whatever the (reachable)
+            // manager just reported, so a future launch can still inject if the manager
+            // becomes unavailable.
+            updateModulesCache(context, cacheArray);
+            return true;
         } catch (Exception e) {
             Log.e(TAG, "NeoLocal: Provider query failed", e);
+            return false;
         }
     }
 
-    private void loadSingleModule(PackageManager pm, String pkgName) {
+    private String loadSingleModule(PackageManager pm, String pkgName) {
         try {
             ApplicationInfo appInfo = pm.getApplicationInfo(pkgName, 0);
             Module m = new Module();
@@ -113,9 +135,21 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
                 m.file = ModuleLoader.loadModule(m.apkPath);
                 cachedModule.add(m);
                 Log.i(TAG, "NeoLocal: Loaded module " + pkgName);
+                return m.apkPath;
             }
         } catch (Throwable e) {
             Log.e(TAG, "NeoLocal: Failed to load " + pkgName, e);
+        }
+        return null;
+    }
+
+    private void updateModulesCache(Context context, JSONArray modules) {
+        try {
+            SharedPreferences shared = context.getSharedPreferences("npatch", Context.MODE_PRIVATE);
+            shared.edit().putString("modules", modules.toString()).apply();
+            Log.i(TAG, "NeoLocal: Updated local modules cache: " + modules);
+        } catch (Throwable e) {
+            Log.e(TAG, "NeoLocal: Failed to update local modules cache", e);
         }
     }
 
