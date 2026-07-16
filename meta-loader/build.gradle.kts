@@ -43,6 +43,9 @@ androidComponents.onVariants { variant ->
 
 dependencies {
     compileOnly(projects.hiddenapi.stubs)
+    // Provides hidden.ByteBufferDexClassLoader (in-memory BaseDexClassLoader) for
+    // DelegateLastInMemoryClassLoader; packaged into metaloader.dex so it is available at bootstrap.
+    implementation(projects.hiddenapi.bridge)
     implementation(projects.share.java)
     implementation(libs.hiddenapibypass)
 }

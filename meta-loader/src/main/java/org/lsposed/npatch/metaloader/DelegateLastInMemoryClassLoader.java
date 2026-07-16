@@ -1,8 +1,8 @@
 package org.lsposed.npatch.metaloader;
 
-import dalvik.system.BaseDexClassLoader;
-
 import java.nio.ByteBuffer;
+
+import hidden.ByteBufferDexClassLoader;
 
 /**
  * In-memory dex class loader with delegate-last (parent-last) resolution.
@@ -19,7 +19,7 @@ import java.nio.ByteBuffer;
  * The resolution order is boot &rarr; this dex &rarr; parent, keeping the framework on its OWN
  * kotlin while it can still reach the host app through the parent.
  */
-public final class DelegateLastInMemoryClassLoader extends BaseDexClassLoader {
+public final class DelegateLastInMemoryClassLoader extends ByteBufferDexClassLoader {
 
     public DelegateLastInMemoryClassLoader(ByteBuffer[] dexFiles, ClassLoader parent) {
         super(dexFiles, parent);
