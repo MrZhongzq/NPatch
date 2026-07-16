@@ -141,7 +141,12 @@ public class SigBypass {
                 if (packageInfo == null) return;
                 replaceSignature(context, packageInfo);
 
-                if (sigBypassLevel >= 3 && cachedOriginalApkPath != null) {
+                // Only redirect OUR OWN package to the origin apk. Redirecting every queried
+                // package (as the original did) points e.g. the system WebView provider's
+                // sourceDir at our origin apk, so WebViewChromiumFactoryProviderForT can no longer
+                // be found — breaking WebView for the ~90% of apps that use it.
+                if (sigBypassLevel >= Constants.SIGBYPASS_LV_PATH_REDIR && cachedOriginalApkPath != null
+                        && context.getPackageName().equals(packageInfo.packageName)) {
                     replacePackageInfoPath(packageInfo, cachedOriginalApkPath);
                 }
             }
@@ -161,7 +166,8 @@ public class SigBypass {
                     spoofApplicationInfo(packageInfo.applicationInfo);
                 }
 
-                if (sigBypassLevel >= Constants.SIGBYPASS_LV_PATH_REDIR && cachedOriginalApkPath != null) {
+                if (sigBypassLevel >= Constants.SIGBYPASS_LV_PATH_REDIR && cachedOriginalApkPath != null
+                        && context.getPackageName().equals(packageInfo.packageName)) {
                     replacePackageInfoPath(packageInfo, cachedOriginalApkPath);
                 }
                 return packageInfo;
