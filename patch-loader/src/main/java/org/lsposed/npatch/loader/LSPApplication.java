@@ -87,6 +87,15 @@ public class LSPApplication {
         XposedBridge.log(TAG + ": " + msg + "\n" + Log.getStackTraceString(tr));
     }
 
+    /** Best-effort reflective field set; some fields are absent on certain Android versions. */
+    private static void trySetField(Object obj, String field, Object value) {
+        if (obj == null) return;
+        try {
+            XposedHelpers.setObjectField(obj, field, value);
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static void onLoad() throws RemoteException, IOException {
         if (isIsolated()) {
             XLog.d(TAG, "Skip isolated process");
@@ -187,13 +196,27 @@ public class LSPApplication {
             // prepareOriginApk(injectProvider) — no separate runtime dex injection needed.
             Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader, config.injectProvider);
             cachedOriginalApkPath = cacheApkPath.toString();
-            appInfo.sourceDir = cacheApkPath.toString();
-            appInfo.publicSourceDir = cacheApkPath.toString();
+            String cacheApk = cacheApkPath.toString();
+            // Redirect EVERY apk-source field consistently to the cached origin apk. Only setting
+            // sourceDir/publicSourceDir leaves scanSourceDir and the LoadedApk's mResDir/
+            // mApplicationInfo pointing elsewhere (mResDir stays null), which makes resource
+            // resolution inconsistent — breaking e.g. "No package ID 6a" and the system-WebView
+            // provider class loading (createApplicationContext) that ~90% of apps rely on.
+            appInfo.sourceDir = cacheApk;
+            appInfo.publicSourceDir = cacheApk;
             appInfo.appComponentFactory = config.appComponentFactory;
+            trySetField(appInfo, "scanSourceDir", cacheApk);
+            trySetField(appInfo, "scanPublicSourceDir", cacheApk);
 
             var mPackages = (Map<?, ?>) XposedHelpers.getObjectField(activityThread, "mPackages");
             mPackages.remove(appInfo.packageName);
             appLoadedApk = activityThread.getPackageInfoNoCheck(appInfo, compatInfo);
+
+            // Keep both LoadedApks' ApplicationInfo and resource dir consistent with the cached apk.
+            trySetField(appLoadedApk, "mApplicationInfo", appInfo);
+            trySetField(stubLoadedApk, "mApplicationInfo", appInfo);
+            trySetField(appLoadedApk, "mResDir", cacheApk);
+            trySetField(stubLoadedApk, "mResDir", cacheApk);
 
             XposedHelpers.setObjectField(mBoundApplication, "info", appLoadedApk);
 
