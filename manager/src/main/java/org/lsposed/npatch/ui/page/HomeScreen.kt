@@ -120,7 +120,7 @@ private fun ShizukuCard() {
                 .fillMaxWidth()
                 .clickable {
                     if (ShizukuApi.isBinderAvailable && !ShizukuApi.isPermissionGranted) {
-                        Shizuku.requestPermission(114514)
+                        ShizukuApi.requestPermission()
                     }
                 }
                 .padding(16.dp),

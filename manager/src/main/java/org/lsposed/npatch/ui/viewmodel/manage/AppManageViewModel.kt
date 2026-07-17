@@ -23,7 +23,7 @@ import org.lsposed.npatch.Patcher
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.Constants
 import org.lsposed.npatch.share.PatchConfig
-import org.lsposed.npatch.ui.util.installApk
+import org.lsposed.npatch.ui.util.installApks
 import org.lsposed.npatch.ui.util.uninstallApkByPackageName
 import org.lsposed.npatch.ui.viewstate.ProcessingState
 import nkbe.util.NPackageManager
@@ -279,14 +279,13 @@ class AppManageViewModel : ViewModel() {
                     if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message ?: "install failed")
                     logger.i("Installed via Shizuku")
                 } else {
-                    // Non-Shizuku, single apk only (splits are gated above).
+                    // Non-Shizuku, single apk only (splits are gated to Shizuku above).
                     if (uninstallFirst && pkg != null) {
                         logger.i("Uninstalling $pkg — confirm the uninstall prompt...")
                         uninstallApkByPackageName(lspApp, pkg)
-                        // Firing the install intent while the old (different-signature) app is
-                        // still present just fails again with "app not installed". Wait until the
-                        // package is actually gone (user confirmed the uninstall) instead of
-                        // racing two stacked system dialogs.
+                        // Installing while the old (different-signature) app is still present just
+                        // fails again with "app not installed". Wait until the package is actually
+                        // gone (user confirmed the uninstall) before installing.
                         val removed = withTimeoutOrNull(120_000L) {
                             while (isPackageInstalled(pkg)) { delay(500) }
                             true
@@ -297,8 +296,14 @@ class AppManageViewModel : ViewModel() {
                         }
                         logger.i("Uninstalled. Installing a fresh copy...")
                     }
-                    installApk(lspApp, apkFiles.first())
-                    logger.i("Handed to the system installer — confirm the install prompt.")
+                    // Use the PackageInstaller SESSION (what `adb install` uses) rather than an
+                    // ACTION_VIEW/FileProvider intent — the intent path was failing with "app not
+                    // installed" even on a clean install; the session path installs reliably.
+                    val ok = installApks(lspApp, apkFiles)
+                    logger.i(
+                        if (ok) "Install session committed — confirm the system prompt."
+                        else "Couldn't start the install session — enable \"install unknown apps\" for NPatch, then retry."
+                    )
                 }
             }
         }.onFailure {
@@ -341,7 +346,11 @@ class AppManageViewModel : ViewModel() {
         Log.i(TAG, "Perform optimize for ${appInfo.app.packageName}")
         optimizeState = ProcessingState.Processing
         val result = withContext(Dispatchers.IO) {
-            ShizukuApi.performDexOptMode(appInfo.app.packageName)
+            runCatching { ShizukuApi.performDexOptMode(appInfo.app.packageName) }
+                .getOrElse {
+                    Log.e(TAG, "Optimize failed (Shizuku unavailable?)", it)
+                    false
+                }
         }
         optimizeState = ProcessingState.Done(result)
     }
