@@ -23,6 +23,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import com.google.accompanist.navigation.animation.rememberAnimatedNavController
 import com.ramcosta.composedestinations.DestinationsNavHost
+import org.lsposed.npatch.manager.KeepAliveService
 import org.lsposed.npatch.ui.page.BottomBarDestination
 import org.lsposed.npatch.ui.page.NavGraphs
 import org.lsposed.npatch.ui.page.appCurrentDestinationAsState
@@ -39,6 +40,13 @@ class MainActivity : ComponentActivity() {
 
         // 檢查並請求權限
         checkAndRequestPermissions()
+
+        // Reliably (re)start the keep-alive foreground service from this foreground
+        // context. Application.onCreate cannot legally start it when the manager process
+        // is cold-started in the background (e.g. a patched app querying ConfigProvider),
+        // so opening the manager is the sanctioned trigger that makes the process resident
+        // and spares patched apps from repeatedly cold-starting it.
+        KeepAliveService.refresh(this)
 
         setContent {
             val navController = rememberAnimatedNavController()

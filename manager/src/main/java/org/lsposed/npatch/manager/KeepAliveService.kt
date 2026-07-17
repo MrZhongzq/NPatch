@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -83,9 +85,34 @@ class KeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        enterForeground()
         handler.postDelayed(notificationChecker, NOTIFICATION_CHECK_INTERVAL_MS)
         handler.post(mirrorSyncRunner)
+    }
+
+    private fun enterForeground() {
+        try {
+            // Android 14+ requires a foregroundServiceType to be supplied for typed
+            // services (we declare specialUse in the manifest); pass it explicitly.
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                    startForeground(NOTIFICATION_ID, buildNotification(), 0)
+                else ->
+                    startForeground(NOTIFICATION_ID, buildNotification())
+            }
+        } catch (e: Throwable) {
+            // e.g. ForegroundServiceStartNotAllowedException if the service was somehow
+            // created from a background-restricted state. Keep-alive is best-effort, so
+            // stop rather than crash the manager process.
+            Log.w("NPatch-KeepAlive", "Unable to enter foreground", e)
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
