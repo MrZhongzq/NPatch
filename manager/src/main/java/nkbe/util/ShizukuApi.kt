@@ -93,6 +93,11 @@ object ShizukuApi {
         check(isPermissionGranted) { "Shizuku permission is not granted" }
     }
 
+    fun getSystemService(name: String): IBinder {
+        ensureReady()
+        return SystemServiceHelper.getSystemService(name).wrap()
+    }
+
     fun getInstalledApplications(): List<ApplicationInfo> {
         ensureReady()
         val userId = Process.myUserHandle().hashCode()
