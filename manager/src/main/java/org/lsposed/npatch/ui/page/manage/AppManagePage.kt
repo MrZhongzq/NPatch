@@ -42,7 +42,6 @@ import org.lsposed.npatch.config.ConfigManager
 import org.lsposed.npatch.config.Configs
 import org.lsposed.npatch.database.entity.Module
 import org.lsposed.npatch.lspApp
-import org.lsposed.npatch.share.Constants
 import org.lsposed.npatch.share.LSPConfig
 import org.lsposed.npatch.ui.component.AnywhereDropdown
 import org.lsposed.npatch.ui.component.AppItem
@@ -147,8 +146,14 @@ fun AppManageBody(
                     items = viewModel.appList,
                     key = { it.first.app.packageName }
                 ) { (appInfo, patchConfig) ->
-                    val isRolling = patchConfig.useManager && patchConfig.lspConfig.VERSION_CODE >= Constants.MIN_ROLLING_VERSION_CODE
-                    val canUpdateLoader = !isRolling && (patchConfig.lspConfig.VERSION_CODE < LSPConfig.instance.VERSION_CODE || patchConfig.managerPackageName != BuildConfig.APPLICATION_ID)
+                    // A patch baked by a different NPatch version than the currently
+                    // installed manager may be incompatible after a manager upgrade — the
+                    // manager-mode loader/metaloader protocol can change between versions
+                    // (see the libnpatch.so load break). There is no reliable "rolling"
+                    // exemption, so flag ANY version/manager mismatch and let the user
+                    // re-patch (which preserves app data) to re-sync with this manager.
+                    val isOutdated = patchConfig.lspConfig.VERSION_CODE != LSPConfig.instance.VERSION_CODE ||
+                            patchConfig.managerPackageName != BuildConfig.APPLICATION_ID
                     var expanded by remember { mutableStateOf(false) }
 
                     AnywhereDropdown(
@@ -174,11 +179,7 @@ fun AppManageBody(
                                             } else {
                                                 MaterialTheme.colorScheme.tertiary
                                             }
-                                            val versionText = if (isRolling) {
-                                                stringResource(R.string.manage_rolling)
-                                            } else {
-                                                patchConfig.lspConfig.VERSION_CODE.toString()
-                                            }
+                                            val versionText = patchConfig.lspConfig.VERSION_CODE.toString()
 
                                             Text(
                                                 text = "$patchText  $versionText",
@@ -196,8 +197,8 @@ fun AppManageBody(
                                                 )
                                             }
                                         }
-                                        // 旧版修补的不兼容警告(点整项后可在菜单里"重新修补")
-                                        if (canUpdateLoader) {
+                                        // 版本/管理器不一致的不兼容警告(点整项后可在菜单里"重新修补")
+                                        if (isOutdated) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 with(LocalDensity.current) {
                                                     val size = MaterialTheme.typography.labelSmall.fontSize * 1.2
@@ -226,17 +227,18 @@ fun AppManageBody(
                             onClick = {}, enabled = false
                         )
                         val shizukuUnavailable = stringResource(R.string.shizuku_unavailable)
-                        if (canUpdateLoader || BuildConfig.DEBUG) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.manage_update_loader)) },
-                                onClick = {
-                                    expanded = false
-                                    scope.launch {
-                                        viewModel.dispatch(AppManageViewModel.ViewAction.UpdateLoader(appInfo, patchConfig))
-                                    }
+                        // Re-patch is available for EVERY patched app, so the user can
+                        // one-click re-patch (data-preserving) to re-sync any app with the
+                        // current manager after an upgrade — not only ones we flagged.
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.manage_update_loader)) },
+                            onClick = {
+                                expanded = false
+                                scope.launch {
+                                    viewModel.dispatch(AppManageViewModel.ViewAction.UpdateLoader(appInfo, patchConfig))
                                 }
-                            )
-                        }
+                            }
+                        )
                         if (patchConfig.useManager) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.manage_module_scope)) },
