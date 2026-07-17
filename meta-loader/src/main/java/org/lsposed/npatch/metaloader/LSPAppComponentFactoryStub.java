@@ -144,7 +144,11 @@ public class LSPAppComponentFactoryStub extends AppComponentFactory {
         if (packageName == null || packageName.isEmpty()) {
             throw new IOException("Unable to resolve current package name");
         }
-        File baseDir = new File("/data/user/0/" + packageName + "/cache");
+        // Use the CURRENT user's data dir, not a hardcoded /data/user/0. Cloned / work-profile
+        // apps (user 10, 11, ...) live under /data/user/<userId>; the hardcode crashed them with
+        // "Unable to create cache directory: /data/user/0/<pkg>/cache" (issue #82).
+        int userId = Process.myUid() / 100000;
+        File baseDir = new File("/data/user/" + userId + "/" + packageName + "/cache");
         if (!baseDir.exists() && !baseDir.mkdirs()) {
             throw new IOException("Unable to create cache directory: " + baseDir);
         }

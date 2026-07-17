@@ -25,6 +25,7 @@
     <string name="home_device_info">Equipment Information</string>
     <string name="coming_soon">Stay tuned</string>
     <string name="home_system_abi">System ABI</string>
+    <string name="home_current_user">Current user</string>
     <string name="home_info_copied">Copied to clipboard</string>
     <string name="home_support">Support</string>
     <string name="home_description">NPatch is a free non-root Xposed framework based on LSPosed core.</string>

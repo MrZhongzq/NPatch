@@ -176,7 +176,10 @@ private fun InfoCard() {
         stringResource(R.string.home_framework_version) to "${LSPConfig.instance.CORE_VERSION_NAME} (${LSPConfig.instance.CORE_VERSION_CODE})",
         stringResource(R.string.home_system_version) to apiVersion,
         stringResource(R.string.home_device) to deviceName,
-        stringResource(R.string.home_system_abi) to Build.SUPPORTED_ABIS[0]
+        stringResource(R.string.home_system_abi) to Build.SUPPORTED_ABIS[0],
+        // The manager runs per-user: a cloned/work-profile instance (user 10, 11, ...) manages
+        // that user's patched apps separately from the main user (0).
+        stringResource(R.string.home_current_user) to "${android.os.Process.myUserHandle().hashCode()}"
     )
 
     val copySuccessMessage = stringResource(R.string.home_info_copied)

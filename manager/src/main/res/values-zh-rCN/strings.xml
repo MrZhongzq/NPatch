@@ -25,6 +25,7 @@
     <string name="home_device_info">设备信息</string>
     <string name="coming_soon">敬请期待</string>
     <string name="home_system_abi">系统架构</string>
+    <string name="home_current_user">当前用户</string>
     <string name="home_info_copied">已复制到剪贴板</string>
     <string name="home_support">支持</string>
     <string name="home_description">NPatch 是一款免费且迭代于 LSPatch 的，基于 LSPosed 核心的免 Root 的 Xposed 框架。</string>

@@ -231,7 +231,10 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
     }
 
     @Override
-    public String getPrefsPath(String packageName) throws RemoteException { return "/data/data/" + packageName + "/shared_prefs/"; }
+    public String getPrefsPath(String packageName) throws RemoteException {
+        int userId = android.os.Process.myUid() / 100000;
+        return "/data/user/" + userId + "/" + packageName + "/shared_prefs/";
+    }
     @Override
     public ParcelFileDescriptor requestInjectedManagerBinder(List<IBinder> binder) throws RemoteException { return null; }
     @Override

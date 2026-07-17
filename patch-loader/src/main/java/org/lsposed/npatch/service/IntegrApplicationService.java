@@ -138,7 +138,8 @@ public class IntegrApplicationService extends ILSPApplicationService.Stub {
 
     @Override
     public String getPrefsPath(String packageName) throws RemoteException {
-        return "/data/data/" + packageName + "/shared_prefs/";
+        int userId = android.os.Process.myUid() / 100000;
+        return "/data/user/" + userId + "/" + packageName + "/shared_prefs/";
     }
 
     @Override
