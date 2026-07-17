@@ -10,6 +10,7 @@ import android.content.pm.PackageParser;
 import android.content.pm.Signature;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.os.Process;
 import android.util.Base64;
 import android.util.Log;
 
@@ -19,7 +20,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.lsposed.lspd.nativebridge.SvcBypass;
 import org.lsposed.npatch.loader.util.XLog;
-import org.lsposed.npatch.share.Constants;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -27,6 +27,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.ZipEntry;
@@ -39,9 +41,14 @@ import de.robv.android.xposed.XposedHelpers;
 public class SigBypass {
 
     private static final String TAG = "NPatch-SigBypass";
+    // PackageManager.hasSigningCertificate() certificate input types.
+    private static final int CERT_INPUT_RAW_X509 = 0;
+    private static final int CERT_INPUT_SHA256 = 1;
     private static final Map<String, String> signatures = new HashMap<>();
     private static String cachedOriginalApkPath;
     private static String cachedOriginalFactory = null;
+    private static boolean packageArchiveInfoHooked;
+    private static boolean hasSigningCertificateHooked;
 
     private static void replaceSignature(Context context, PackageInfo packageInfo) {
         boolean hasSignature = (packageInfo.signatures != null && packageInfo.signatures.length != 0) || packageInfo.signingInfo != null;
@@ -85,39 +92,6 @@ public class SigBypass {
         }
     }
 
-    // 移植自 SRPatch
-    private static void spoofContextInternalFields(Context context, String fakeApkPath) {
-        try {
-            Context baseContext = context;
-            while (baseContext instanceof android.content.ContextWrapper) {
-                baseContext = ((android.content.ContextWrapper) baseContext).getBaseContext();
-            }
-            java.lang.reflect.Field packageInfoField = baseContext.getClass().getDeclaredField("mPackageInfo");
-            packageInfoField.setAccessible(true);
-            Object packageInfoObject = packageInfoField.get(baseContext);
-
-            if (packageInfoObject != null) {
-                // mAppDir
-                java.lang.reflect.Field appDirField = packageInfoObject.getClass().getDeclaredField("mAppDir");
-                appDirField.setAccessible(true);
-                appDirField.set(packageInfoObject, fakeApkPath);
-
-                // mResDir
-                java.lang.reflect.Field resDirField = packageInfoObject.getClass().getDeclaredField("mResDir");
-                resDirField.setAccessible(true);
-                resDirField.set(packageInfoObject, fakeApkPath);
-            }
-
-            // 同步修改當前 Context 的 ApplicationInfo
-            ApplicationInfo currentAppInfo = context.getApplicationInfo();
-            currentAppInfo.sourceDir = fakeApkPath;
-            currentAppInfo.publicSourceDir = fakeApkPath;
-
-        } catch (Throwable t) {
-            Log.w(TAG, "Failed to spoof Context internal fields", t);
-        }
-    }
-
     private static void spoofApplicationInfo(ApplicationInfo appInfo) {
         if (appInfo != null) {
             if (cachedOriginalFactory != null && !cachedOriginalFactory.isEmpty()) {
@@ -126,10 +100,119 @@ public class SigBypass {
         }
     }
 
-    private static void replacePackageInfoPath(PackageInfo packageInfo, String fakeApkPath) {
-        if (packageInfo != null && packageInfo.applicationInfo != null && fakeApkPath != null) {
-            packageInfo.applicationInfo.sourceDir = fakeApkPath;
-            packageInfo.applicationInfo.publicSourceDir = fakeApkPath;
+    // Returns the original (pre-patch) signature recorded for a package, loading it from the
+    // patched app's "npatch" manifest metadata on first use. Backs hasSigningCertificate spoofing.
+    private static Signature getOriginalSignature(Context context, String packageName) {
+        if (!signatures.containsKey(packageName)) {
+            String replacement = null;
+            try {
+                var metaData = context.getPackageManager()
+                        .getApplicationInfo(packageName, PackageManager.GET_META_DATA).metaData;
+                String encoded = metaData != null ? metaData.getString("npatch") : null;
+                if (encoded != null) {
+                    var json = new String(Base64.decode(encoded, Base64.DEFAULT), StandardCharsets.UTF_8);
+                    replacement = new JSONObject(json).getString("originalSignature");
+                }
+            } catch (Throwable ignored) {
+            }
+            signatures.put(packageName, replacement);
+        }
+        String hex = signatures.get(packageName);
+        return hex != null ? new Signature(hex) : null;
+    }
+
+    private static boolean matchesOriginalCertificate(Signature signature, byte[] certificate, int type) {
+        if (signature == null || certificate == null) return false;
+        try {
+            byte[] sigBytes = signature.toByteArray();
+            if (type == CERT_INPUT_SHA256) {
+                byte[] sha = MessageDigest.getInstance("SHA-256").digest(sigBytes);
+                return Arrays.equals(sha, certificate);
+            }
+            // CERT_INPUT_RAW_X509
+            return Arrays.equals(sigBytes, certificate);
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    // getPackageArchiveInfo(patchedApk) — feed the parser origin.apk and spoof the signature
+    // so an app that inspects its own installed apk sees the original certificate.
+    private static void hookPackageArchiveInfo(Context context) {
+        if (packageArchiveInfoHooked) return;
+        try {
+            final String patchedApkPath = context.getPackageResourcePath();
+            XC_MethodHook hook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (cachedOriginalApkPath == null) return;
+                    Object apkPath = param.args.length == 0 ? null : param.args[0];
+                    if (apkPath instanceof String && apkPath.equals(patchedApkPath)) {
+                        param.args[0] = cachedOriginalApkPath;
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    PackageInfo packageInfo = (PackageInfo) param.getResult();
+                    if (packageInfo != null) replaceSignature(context, packageInfo);
+                }
+            };
+            hookPackageArchiveInfoMethods(PackageManager.class, hook);
+            try {
+                hookPackageArchiveInfoMethods(Class.forName("android.app.ApplicationPackageManager"), hook);
+            } catch (Throwable ignored) {
+            }
+            packageArchiveInfoHooked = true;
+        } catch (Throwable e) {
+            Log.w(TAG, "fail to replace getPackageArchiveInfo", e);
+        }
+    }
+
+    private static void hookPackageArchiveInfoMethods(Class<?> clazz, XC_MethodHook hook) {
+        try {
+            XposedBridge.hookAllMethods(clazz, "getPackageArchiveInfo", hook);
+        } catch (NoSuchMethodError ignored) {
+        }
+    }
+
+    // hasSigningCertificate(pkg/uid, cert, type) — report a match when the queried certificate
+    // is the original one, so certificate-pinning tamper checks pass.
+    private static void hookHasSigningCertificate(Context context) {
+        if (hasSigningCertificateHooked) return;
+        try {
+            XC_MethodHook hook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (param.args.length < 3) return;
+                    Object packageNameArg = param.args[0];
+                    Object certificateArg = param.args[1];
+                    Object typeArg = param.args[2];
+                    if (!(certificateArg instanceof byte[]) || !(typeArg instanceof Integer)) {
+                        return;
+                    }
+                    String packageName = null;
+                    if (packageNameArg instanceof String) {
+                        packageName = (String) packageNameArg;
+                    } else if (packageNameArg instanceof Integer && ((Integer) packageNameArg) == Process.myUid()) {
+                        packageName = context.getPackageName();
+                    }
+                    if (packageName == null) return;
+                    Signature originalSignature = getOriginalSignature(context, packageName);
+                    if (originalSignature == null) return;
+                    if (matchesOriginalCertificate(originalSignature, (byte[]) certificateArg, (Integer) typeArg)) {
+                        param.setResult(true);
+                    }
+                }
+            };
+            XposedBridge.hookAllMethods(PackageManager.class, "hasSigningCertificate", hook);
+            try {
+                XposedBridge.hookAllMethods(Class.forName("android.app.ApplicationPackageManager"), "hasSigningCertificate", hook);
+            } catch (Throwable ignored) {
+            }
+            hasSigningCertificateHooked = true;
+        } catch (Throwable e) {
+            Log.w(TAG, "fail to hook hasSigningCertificate", e);
         }
     }
 
@@ -139,16 +222,11 @@ public class SigBypass {
             protected void afterHookedMethod(MethodHookParam param) {
                 var packageInfo = (PackageInfo) param.getResult();
                 if (packageInfo == null) return;
+                // lv3+ relies on signature spoofing (below): return the ORIGINAL signature from
+                // the PackageManager while leaving sourceDir pointing at the patched apk. We no
+                // longer rewrite the app's own sourceDir here — that path redirection broke
+                // WebView/classloader context and is superseded by the spoofing hooks.
                 replaceSignature(context, packageInfo);
-
-                // Only redirect OUR OWN package to the origin apk. Redirecting every queried
-                // package (as the original did) points e.g. the system WebView provider's
-                // sourceDir at our origin apk, so WebViewChromiumFactoryProviderForT can no longer
-                // be found — breaking WebView for the ~90% of apps that use it.
-                if (sigBypassLevel >= Constants.SIGBYPASS_LV_PATH_REDIR && cachedOriginalApkPath != null
-                        && context.getPackageName().equals(packageInfo.packageName)) {
-                    replacePackageInfoPath(packageInfo, cachedOriginalApkPath);
-                }
             }
         });
     }
@@ -164,11 +242,6 @@ public class SigBypass {
                 // 還原 appComponentFactory
                 if (packageInfo.applicationInfo != null) {
                     spoofApplicationInfo(packageInfo.applicationInfo);
-                }
-
-                if (sigBypassLevel >= Constants.SIGBYPASS_LV_PATH_REDIR && cachedOriginalApkPath != null
-                        && context.getPackageName().equals(packageInfo.packageName)) {
-                    replacePackageInfoPath(packageInfo, cachedOriginalApkPath);
                 }
                 return packageInfo;
             }
@@ -306,15 +379,19 @@ public class SigBypass {
                     context.getPackageName()
             );
 
-            // 路徑重定向 (Path Redirection)
+            // Signature spoofing (replaces the old lv3 path redirection). Instead of pointing
+            // the app's own sourceDir/context at origin.apk (which broke WebView/classloader
+            // context), we return the ORIGINAL signature from every PackageManager signature
+            // surface: getPackageInfo/CREATOR (lv1, above), getPackageArchiveInfo, and
+            // hasSigningCertificate. File-level reads are still covered by the lv2 openat/IO
+            // redirect above.
             if (sigBypassLevel >= 3) {
                 try {
-                    replaceApplication(context.getPackageName(), cachedOriginalApkPath, cachedOriginalApkPath);
-
-                    spoofContextInternalFields(context, cachedOriginalApkPath);
-                    XLog.i(TAG, "Path Redirection (LV3) enabled");
+                    hookPackageArchiveInfo(context);
+                    hookHasSigningCertificate(context);
+                    XLog.i(TAG, "Signature spoofing (LV3) enabled");
                 } catch (Throwable t) {
-                    Log.w(TAG, "Failed to apply path redirection", t);
+                    Log.w(TAG, "Failed to apply signature spoofing", t);
                 }
             }
 
