@@ -28,9 +28,7 @@ import kotlinx.coroutines.withContext
 import org.lsposed.npatch.R
 import org.lsposed.npatch.ui.component.CenterTopBar
 import org.lsposed.npatch.ui.util.LocalSnackbarHost
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -225,46 +223,51 @@ private fun LogItem(entry: LogEntry) {
     }
 }
 
+private const val MAX_LOG_ENTRIES = 8000
+
+// A non-privileged manager can't read other apps' / the system's logcat (that needs the
+// privileged READ_LOGS permission), so the previous logcat-based reader silently returned
+// nothing. Each patched app instead writes its OWN process log to
+//   Android/media/<pkg>/npatch/log/<yyyyMMdd>.log
+// (see the loader's startLogcatCapture). The manager holds MANAGE_EXTERNAL_STORAGE, so read
+// those files directly.
 private suspend fun fetchLogs(timeRange: TimeRange, levels: Set<LogLevel>): List<LogEntry> =
     withContext(Dispatchers.IO) {
         try {
             val levelFilter = levels.joinToString("") { it.tag }
             if (levelFilter.isEmpty()) return@withContext emptyList()
 
-            val cmd = mutableListOf("logcat", "-d", "-b", "main,system,crash", "-v", "threadtime")
-            if (timeRange != TimeRange.ALL) {
-                val seconds = timeRange.millis / 1000
-                cmd.addAll(listOf("-T", "${seconds}s"))
-            }
-            val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val cutoff = if (timeRange == TimeRange.ALL) 0L
+                         else System.currentTimeMillis() - timeRange.millis
 
-            val entries = mutableListOf<LogEntry>()
+            val mediaRoot = File(Environment.getExternalStorageDirectory(), "Android/media")
+            val logFiles = (mediaRoot.listFiles() ?: emptyArray())
+                .flatMap { pkgDir ->
+                    val logDir = File(pkgDir, "npatch/log")
+                    (logDir.listFiles { f -> f.isFile && f.name.endsWith(".log") } ?: emptyArray())
+                        .filter { it.lastModified() >= cutoff }
+                        .map { pkgDir.name to it }
+                }
+                .sortedByDescending { it.second.lastModified() }
+
             val pattern = Regex("""^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+\d+\s+\d+\s+([VDIWEF])\s+(.+?)\s*:\s+(.*)$""")
+            val entries = mutableListOf<LogEntry>()
 
-            reader.useLines { lines ->
-                lines.forEach { line ->
-                    val match = pattern.matchEntire(line)
-                    if (match != null) {
-                        val (timestamp, level, tag, message) = match.destructured
-                        val trimmedTag = tag.trim()
-                        if (level in levelFilter &&
-                            (trimmedTag.contains("NPatch", ignoreCase = true) ||
-                             trimmedTag.contains("LSPosed", ignoreCase = true) ||
-                             trimmedTag.contains("Xposed", ignoreCase = true) ||
-                             // "Vector" is the core framework's log tag (org.lsposed.lspd
-                             // Utils.LOG_TAG); without it every framework log was dropped.
-                             trimmedTag.contains("Vector", ignoreCase = true) ||
-                             trimmedTag.contains("npatch", ignoreCase = true))) {
-                            entries.add(LogEntry(timestamp, level, trimmedTag, message, line))
-                        }
-                    }
+            for ((pkg, file) in logFiles) {
+                if (entries.size >= MAX_LOG_ENTRIES) break
+                // Newest-first within the file: read then walk from the end.
+                val lines = try { file.readLines() } catch (_: Exception) { continue }
+                for (line in lines.asReversed()) {
+                    val match = pattern.matchEntire(line) ?: continue
+                    val (timestamp, level, tag, message) = match.destructured
+                    if (level !in levelFilter) continue
+                    entries.add(LogEntry(timestamp, level, "$pkg · ${tag.trim()}", message, line))
+                    if (entries.size >= MAX_LOG_ENTRIES) break
                 }
             }
-            process.waitFor()
-            entries.reversed()  // newest first
+            entries
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch logs", e)
+            Log.e(TAG, "Failed to read logs", e)
             emptyList()
         }
     }

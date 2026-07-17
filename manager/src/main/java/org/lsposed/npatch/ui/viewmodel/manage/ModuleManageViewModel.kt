@@ -30,6 +30,12 @@ class ModuleManageViewModel : ViewModel() {
     val appList: List<Pair<NPackageManager.AppInfo, XposedInfo>> by derivedStateOf {
         NPackageManager.appList.mapNotNull { appInfo ->
             val metaData = appInfo.app.metaData ?: return@mapNotNull null
+            // A patched host apk carries the "npatch"/"lspatch" patch config; it is not an
+            // Xposed module even if it also declares xposedminversion (e.g. patched module apps
+            // or LSPatch/ReVanced outputs) — don't mistake it for one.
+            if (metaData.getString("npatch") != null || metaData.getString("lspatch") != null) {
+                return@mapNotNull null
+            }
             appInfo to XposedInfo(
                 metaData.getInt("xposedminversion", -1).also { if (it == -1) return@mapNotNull null },
                 metaData.getString("xposeddescription") ?: "",

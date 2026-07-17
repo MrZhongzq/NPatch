@@ -176,7 +176,12 @@ class AppManageViewModel : ViewModel() {
                 appInfo.app.metaData?.getString("npatch")?.let {
                     val json = Base64.decode(it, Base64.DEFAULT).toString(Charsets.UTF_8)
                     val config = Gson().fromJson(json, PatchConfig::class.java)
-                    if (config?.lspConfig == null) null else appInfo to config
+                    // The "npatch"/"lspatch" meta-data key is also written by other LSPatch-based
+                    // patchers (e.g. ReVanced Xposed), whose config carries an all-zero lspConfig.
+                    // Those apps use a foreign loader we can't manage, so only accept configs that
+                    // carry a genuine NPatch stamp (non-zero core version).
+                    if (config?.lspConfig == null || config.lspConfig.CORE_VERSION_CODE <= 0) null
+                    else appInfo to config
                 }
             }.getOrNull()
         }
