@@ -3,6 +3,7 @@ package org.lsposed.npatch.service;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -13,6 +14,7 @@ import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.lsposed.npatch.util.LocalInjectedModuleService;
 import org.lsposed.npatch.util.ModuleLoader;
 import org.lsposed.lspd.models.Module;
 import org.lsposed.lspd.service.ILSPApplicationService;
@@ -27,10 +29,12 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
     private static final String AUTHORITY = "org.lsposed.npatch.manager.provider.config";
     private static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY + "/config");
 
-    private final List<Module> cachedModule;
+    private final List<Module> legacyModules;
+    private final List<Module> modernModules;
 
     public NeoLocalApplicationService(Context context) {
-        cachedModule = Collections.synchronizedList(new ArrayList<>());
+        legacyModules = Collections.synchronizedList(new ArrayList<>());
+        modernModules = Collections.synchronizedList(new ArrayList<>());
         boolean providerAvailable = loadModulesFromProvider(context);
 
         // Only fall back to the local cache when the Manager Provider is genuinely
@@ -41,7 +45,7 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         // This is the decoupling that lets injection survive an unavailable manager:
         // every reachable query refreshes the cache (see updateModulesCache), so the
         // patched app keeps a fresh, self-sufficient module list to load from.
-        if (!providerAvailable && cachedModule.isEmpty()) {
+        if (!providerAvailable && legacyModules.isEmpty() && modernModules.isEmpty()) {
             Log.w(TAG, "NeoLocal: Provider unavailable, falling back to local cache.");
             loadModulesFromCache(context);
         }
@@ -62,9 +66,9 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
                 String path = obj.optString("path");
 
                 if (path != null && !path.isEmpty() && new File(path).exists()) {
-                    loadModuleByPath(packageName, path);
+                    loadModuleByPath(context, packageName, path);
                 } else if (packageName != null) {
-                    loadSingleModule(pm, packageName);
+                    loadSingleModule(context, pm, packageName);
                 }
             }
         } catch (Exception e) {
@@ -72,13 +76,24 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         }
     }
 
-    private void loadModuleByPath(String pkgName, String path) {
+    private void loadModuleByPath(Context context, String pkgName, String path) {
         try {
             Module m = new Module();
             m.packageName = pkgName;
             m.apkPath = path;
-            m.file = ModuleLoader.loadModule(m.apkPath);
-            cachedModule.add(m);
+            m.applicationInfo = readApplicationInfo(context, path, pkgName);
+            m.file = ModuleLoader.loadModule(m.apkPath, readLegacyMinApiVersion(m.applicationInfo));
+            if (m.file == null) {
+                Log.w(TAG, "NeoLocal: Skipping unsupported cached module " + pkgName);
+                return;
+            }
+            m.appId = m.applicationInfo == null ? -1 : m.applicationInfo.uid;
+            m.service = new LocalInjectedModuleService(context, m.packageName);
+            if (m.file.legacy) {
+                legacyModules.add(m);
+            } else {
+                modernModules.add(m);
+            }
             Log.i(TAG, "Loaded cached module " + pkgName);
         } catch (Throwable e) {
             Log.e(TAG, "Failed to load cached module " + pkgName, e);
@@ -104,7 +119,7 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
                 int colIndex = cursor.getColumnIndex("packageName");
                 if (colIndex != -1) {
                     String packageName = cursor.getString(colIndex);
-                    String apkPath = loadSingleModule(pm, packageName);
+                    String apkPath = loadSingleModule(context, pm, packageName);
                     if (apkPath != null) {
                         JSONObject moduleObj = new JSONObject();
                         moduleObj.put("path", apkPath);
@@ -124,7 +139,7 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         }
     }
 
-    private String loadSingleModule(PackageManager pm, String pkgName) {
+    private String loadSingleModule(Context context, PackageManager pm, String pkgName) {
         try {
             ApplicationInfo appInfo = pm.getApplicationInfo(pkgName, 0);
             Module m = new Module();
@@ -132,8 +147,19 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
             m.apkPath = appInfo.sourceDir;
 
             if (m.apkPath != null && new File(m.apkPath).exists()) {
-                m.file = ModuleLoader.loadModule(m.apkPath);
-                cachedModule.add(m);
+                m.applicationInfo = appInfo;
+                m.file = ModuleLoader.loadModule(m.apkPath, readLegacyMinApiVersion(m.applicationInfo));
+                if (m.file == null) {
+                    Log.w(TAG, "NeoLocal: Skipping unsupported module " + pkgName);
+                    return null;
+                }
+                m.appId = appInfo.uid;
+                m.service = new LocalInjectedModuleService(context, m.packageName);
+                if (m.file.legacy) {
+                    legacyModules.add(m);
+                } else {
+                    modernModules.add(m);
+                }
                 Log.i(TAG, "NeoLocal: Loaded module " + pkgName);
                 return m.apkPath;
             }
@@ -153,14 +179,55 @@ public class NeoLocalApplicationService extends ILSPApplicationService.Stub {
         }
     }
 
+    private static ApplicationInfo readApplicationInfo(Context context, String apkPath, String fallbackPackageName) {
+        try {
+            PackageManager packageManager = context.getPackageManager();
+            PackageInfo packageInfo = packageManager.getPackageArchiveInfo(apkPath, PackageManager.GET_META_DATA);
+            if (packageInfo != null && packageInfo.applicationInfo != null) {
+                ApplicationInfo applicationInfo = packageInfo.applicationInfo;
+                applicationInfo.sourceDir = apkPath;
+                applicationInfo.publicSourceDir = apkPath;
+                if (applicationInfo.packageName == null) {
+                    applicationInfo.packageName = packageInfo.packageName;
+                }
+                return applicationInfo;
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "NeoLocal: Failed to read cached module ApplicationInfo: " + fallbackPackageName, e);
+        }
+        ApplicationInfo fallback = new ApplicationInfo();
+        fallback.packageName = fallbackPackageName;
+        fallback.sourceDir = apkPath;
+        fallback.publicSourceDir = apkPath;
+        fallback.uid = -1;
+        return fallback;
+    }
+
+    private static int readLegacyMinApiVersion(ApplicationInfo applicationInfo) {
+        if (applicationInfo == null || applicationInfo.metaData == null) {
+            return 0;
+        }
+        Object value = applicationInfo.metaData.get("xposedminversion");
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value != null) {
+            try {
+                return Integer.parseInt(String.valueOf(value).trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0;
+    }
+
     @Override
     public List<Module> getLegacyModulesList() throws RemoteException {
-        return cachedModule;
+        return legacyModules;
     }
 
     @Override
     public List<Module> getModulesList() throws RemoteException {
-        return new ArrayList<>();
+        return modernModules;
     }
 
     @Override
