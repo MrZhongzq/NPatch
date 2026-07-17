@@ -55,6 +55,7 @@ import org.lsposed.npatch.ui.component.settings.SettingsCheckBox
 import org.lsposed.npatch.ui.component.settings.SettingsEditor
 import org.lsposed.npatch.ui.component.settings.SettingsItem
 import org.lsposed.npatch.ui.page.destinations.SelectAppsScreenDestination
+import org.lsposed.npatch.util.Lv4Compat
 import org.lsposed.npatch.ui.util.InstallResultReceiver
 import org.lsposed.npatch.ui.util.LocalSnackbarHost
 import org.lsposed.npatch.ui.util.checkIsApkFixedByLSP
@@ -275,11 +276,44 @@ private fun ConfiguringTopBar(onBackClick: () -> Unit) {
 @Composable
 private fun ConfiguringFab() {
     val viewModel = viewModel<NewPatchViewModel>()
+    var showLv4Warning by remember { mutableStateOf(false) }
+
     ExtendedFloatingActionButton(
         text = { Text(stringResource(R.string.patch_start)) },
         icon = { Icon(Icons.Outlined.AutoFixHigh, null) },
-        onClick = { viewModel.dispatch(ViewAction.SubmitPatch) }
+        onClick = {
+            if (viewModel.sigBypassLevel == 4 &&
+                Lv4Compat.isIncompatibleWithLv4(viewModel.patchApp.app.packageName)) {
+                showLv4Warning = true
+            } else {
+                viewModel.lv3Downgraded = false
+                viewModel.dispatch(ViewAction.SubmitPatch)
+            }
+        }
     )
+
+    if (showLv4Warning) {
+        AlertDialog(
+            onDismissRequest = { showLv4Warning = false },
+            title = { Text(stringResource(R.string.patch_lv4_incompatible_title)) },
+            text = { Text(stringResource(R.string.patch_lv4_incompatible_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLv4Warning = false
+                    viewModel.sigBypassLevel = 3
+                    viewModel.lv3Downgraded = true
+                    viewModel.dispatch(ViewAction.SubmitPatch)
+                }) { Text(stringResource(R.string.patch_lv4_fallback_lv3)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showLv4Warning = false
+                    viewModel.lv3Downgraded = false
+                    viewModel.dispatch(ViewAction.SubmitPatch)
+                }) { Text(stringResource(R.string.patch_lv4_force)) }
+            }
+        )
+    }
 }
 
 @Composable

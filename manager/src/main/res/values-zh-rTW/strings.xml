@@ -83,6 +83,12 @@
     <string name="patch_output_log_to_media">日誌輸出到 Media 目錄</string>
     <string name="patch_output_log_to_media_desc">將模組的 Xposed 日誌輸出到目標應用的 Media 目錄</string>
     <string name="patch_start">開始打包</string>
+    <string name="patch_lv4_incompatible_title">lv4 可能不相容</string>
+    <string name="patch_lv4_incompatible_text">目前應用自帶 seccomp 沙箱(Gecko/Chromium 引擎)。lv4 的 seccomp 過濾器會與其衝突,通常導致應用崩潰。lv3 不使用 seccomp,對這類應用可正常運作。是否回退到 lv3?</string>
+    <string name="patch_lv4_fallback_lv3">使用 lv3</string>
+    <string name="patch_lv4_force">仍用 lv4</string>
+    <string name="manage_lv4_incompatible_warning">lv4 可能與此應用不相容——若崩潰請用 lv3 重新簽章</string>
+    <string name="manage_resign_lv3">使用 lv3 重新簽章</string>
     <string name="patch_return">返回</string>
     <string name="patch_uninstall_text">由於簽名不同，安裝前需要先解除安裝原程式。\n確保您已備份好個人資料。</string>
     <string name="patch_install_successfully">安裝成功</string>

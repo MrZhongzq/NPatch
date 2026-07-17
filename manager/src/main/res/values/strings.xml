@@ -87,6 +87,12 @@
     <string name="patch_output_log_to_media">Output Log to Media Directory</string>
     <string name="patch_output_log_to_media_desc">Output the Xposed log to the target application Media directory.</string>
     <string name="patch_start">Start Patch</string>
+    <string name="patch_lv4_incompatible_title">lv4 may be incompatible</string>
+    <string name="patch_lv4_incompatible_text">This app ships its own seccomp sandbox (a Gecko/Chromium engine). lv4\'s seccomp filter conflicts with it and usually crashes the app. lv3 has no seccomp and works for such apps. Fall back to lv3?</string>
+    <string name="patch_lv4_fallback_lv3">Use lv3</string>
+    <string name="patch_lv4_force">Keep lv4</string>
+    <string name="manage_lv4_incompatible_warning">lv4 may be incompatible with this app — re-sign with lv3 if it crashes</string>
+    <string name="manage_resign_lv3">Re-sign with lv3</string>
     <string name="patch_return">Return</string>
     <string name="patch_uninstall_text">Due to different signatures, you need to uninstall the original app before installing the patched one.\nMake sure you have backed up personal data.</string>
     <string name="patch_install_successfully">Install successfully</string>

@@ -43,6 +43,7 @@ class AppManageViewModel : ViewModel() {
 
     sealed class ViewAction {
         data class UpdateLoader(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
+        data class ResignLv3(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
         object InstallUpdated : ViewAction()
         object InstallUpdatedForce : ViewAction()
         object ClearUpdateLoaderResult : ViewAction()
@@ -119,6 +120,18 @@ class AppManageViewModel : ViewModel() {
         viewModelScope.launch {
             when (action) {
                 is ViewAction.UpdateLoader -> updateLoader(action.appInfo, action.config)
+                is ViewAction.ResignLv3 -> {
+                    // Re-patch the app with the same options but sig bypass forced to lv3, for
+                    // apps whose own seccomp sandbox is incompatible with lv4. All other config
+                    // (manager mode, mirror, injectProvider, originalSignature, ...) is preserved.
+                    val c = action.config
+                    val lv3 = PatchConfig(
+                        c.useManager, c.debuggable, c.overrideVersionCode, 3,
+                        c.originalSignature, c.appComponentFactory, c.injectProvider,
+                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms
+                    )
+                    updateLoader(action.appInfo, lv3)
+                }
                 is ViewAction.InstallUpdated -> installUpdatedApp(uninstallFirst = false)
                 is ViewAction.InstallUpdatedForce -> installUpdatedApp(uninstallFirst = true)
                 is ViewAction.ClearUpdateLoaderResult -> {

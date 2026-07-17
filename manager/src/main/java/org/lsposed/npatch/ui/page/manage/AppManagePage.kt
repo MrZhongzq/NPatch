@@ -50,6 +50,7 @@ import org.lsposed.npatch.config.Configs
 import org.lsposed.npatch.database.entity.Module
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.LSPConfig
+import org.lsposed.npatch.util.Lv4Compat
 import org.lsposed.npatch.ui.component.AnywhereDropdown
 import org.lsposed.npatch.ui.component.AppItem
 import org.lsposed.npatch.ui.component.LoadingDialog
@@ -271,6 +272,11 @@ fun AppManageBody(
                     // re-patch (which preserves app data) to re-sync with this manager.
                     val isOutdated = patchConfig.lspConfig.VERSION_CODE != LSPConfig.instance.VERSION_CODE ||
                             patchConfig.managerPackageName != BuildConfig.APPLICATION_ID
+                    // Patched at lv4 but the app is known to ship its own seccomp sandbox — lv4
+                    // usually crashes it. Every lv4 app also gets a "re-sign with lv3" menu item.
+                    val isLv4 = patchConfig.sigBypassLevel == 4
+                    val isLv4Incompatible = isLv4 &&
+                            Lv4Compat.isIncompatibleWithLv4(appInfo.app.packageName)
                     var expanded by remember { mutableStateOf(false) }
 
                     AnywhereDropdown(
@@ -334,6 +340,27 @@ fun AppManageBody(
                                                 )
                                             }
                                         }
+                                        // lv4-incompatible (own seccomp sandbox) warning — can
+                                        // coexist with the version warning above.
+                                        if (isLv4Incompatible) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                with(LocalDensity.current) {
+                                                    val size = MaterialTheme.typography.labelSmall.fontSize * 1.2
+                                                    Icon(
+                                                        Icons.Filled.Warning,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(size.toDp())
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = stringResource(R.string.manage_lv4_incompatible_warning),
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             )
@@ -347,6 +374,19 @@ fun AppManageBody(
                         // Re-patch is available for EVERY patched app, so the user can
                         // one-click re-patch (data-preserving) to re-sync any app with the
                         // current manager after an upgrade — not only ones we flagged.
+                        if (isLv4) {
+                            // Available on EVERY lv4 app so the user can self-downgrade any app
+                            // they discover to be seccomp-incompatible, not just whitelisted ones.
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.manage_resign_lv3)) },
+                                onClick = {
+                                    expanded = false
+                                    scope.launch {
+                                        viewModel.dispatch(AppManageViewModel.ViewAction.ResignLv3(appInfo, patchConfig))
+                                    }
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.manage_update_loader)) },
                             onClick = {

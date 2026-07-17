@@ -140,8 +140,14 @@ class NewPatchViewModel : ViewModel() {
         }
     }
 
+    // Set when the user accepted downgrading an lv4-incompatible app to lv3 at patch time.
+    var lv3Downgraded by mutableStateOf(false)
+
     private suspend fun launchPatch() {
         logger.i("Launch Patch")
+        if (lv3Downgraded) {
+            logger.i("⚠️ 正在使用 lv3 注入(此应用自带 seccomp 沙箱,已从 lv4 回退;直连 syscall 的签名绕过不完整)")
+        }
         patchState = try {
             Patcher.patch(logger, patchOptions)
             PatchState.FINISHED
