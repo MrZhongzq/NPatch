@@ -40,6 +40,7 @@ class AppManageViewModel : ViewModel() {
 
     sealed class ViewAction {
         data class UpdateLoader(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
+        object InstallUpdated : ViewAction()
         object ClearUpdateLoaderResult : ViewAction()
         data class PerformOptimize(val appInfo: AppInfo) : ViewAction()
         object ClearOptimizeResult : ViewAction()
@@ -106,6 +107,7 @@ class AppManageViewModel : ViewModel() {
         viewModelScope.launch {
             when (action) {
                 is ViewAction.UpdateLoader -> updateLoader(action.appInfo, action.config)
+                is ViewAction.InstallUpdated -> installUpdatedApp()
                 is ViewAction.ClearUpdateLoaderResult -> updateLoaderState = ProcessingState.Idle
                 is ViewAction.PerformOptimize -> performOptimize(action.appInfo)
                 is ViewAction.ClearOptimizeResult -> optimizeState = ProcessingState.Idle
@@ -184,21 +186,14 @@ class AppManageViewModel : ViewModel() {
                     }
                 }
                 Patcher.patch(logger, Patcher.Options(appInfo.app.packageName, false, config, patchPaths, embeddedModulePaths))
-                if (!ShizukuApi.isPermissionGranted) {
-                    val apkFiles = lspApp.targetApkFiles
-                    if (apkFiles.isNullOrEmpty()){
-                        Log.e(TAG, "No patched APK files found")
-                        throw RuntimeException("No patched APK files found")
-                    }
-                    if (apkFiles.size > 1) {
-                        val success = installApks(lspApp, apkFiles)
-                    } else  {
-                        installApk(lspApp, apkFiles.first())
-                    }
-                } else {
-                    val (status, message) = NPackageManager.install()
-                    if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message)
+                // Patch only — installation is a separate, user-triggered step (see
+                // installUpdatedApp). The auto-popped installer dialog can fail to show or get
+                // dismissed by a stray tap, so the completion screen offers an explicit
+                // "Install" button the user can tap (and retry) instead.
+                if (lspApp.targetApkFiles.isNullOrEmpty()) {
+                    throw RuntimeException("No patched APK files found")
                 }
+                logger.i("Patch finished. Tap Install to update (app data is kept).")
             }
         }
         result.onSuccess {
@@ -208,6 +203,34 @@ class AppManageViewModel : ViewModel() {
             logger.e(it.stackTraceToString())
         }
         updateLoaderState = ProcessingState.Done(result)
+    }
+
+    // Triggered by the explicit "Install" button on the re-patch completion screen. Installs
+    // the just-patched apk(s) (kept in lspApp.targetApkFiles) as an update, preserving data.
+    // Callable repeatedly so the user can retry if the system installer dialog didn't appear.
+    private suspend fun installUpdatedApp() {
+        val apkFiles = lspApp.targetApkFiles
+        if (apkFiles.isNullOrEmpty()) {
+            logger.e("No patched APK files to install")
+            return
+        }
+        logger.i("Installing ${apkFiles.size} apk(s)...")
+        runCatching {
+            withContext(Dispatchers.IO) {
+                if (!ShizukuApi.isPermissionGranted) {
+                    if (apkFiles.size > 1) {
+                        installApks(lspApp, apkFiles)
+                    } else {
+                        installApk(lspApp, apkFiles.first())
+                    }
+                } else {
+                    val (status, message) = NPackageManager.install()
+                    if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message)
+                }
+            }
+        }.onFailure {
+            logger.e("Install failed: ${it.message}")
+        }
     }
 
     private suspend fun performOptimize(appInfo: AppInfo) {

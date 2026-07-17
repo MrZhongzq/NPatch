@@ -150,6 +150,7 @@ fun AppManageBody(
                                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                             )
                         } else {
+                            val patchSucceeded = done.result.isSuccess
                             LaunchedEffect(Unit) {
                                 done.result.onSuccess {
                                     snackbarHost.showSnackbar(updateSuccessfully)
@@ -158,25 +159,43 @@ fun AppManageBody(
                                 }
                             }
                             Row(Modifier.padding(top = 12.dp)) {
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult) },
-                                    content = { Text(stringResource(R.string.patch_return)) }
-                                )
-                                Spacer(Modifier.weight(0.2f))
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = {
-                                        val cm = lspApp.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        cm.setPrimaryClip(
-                                            ClipData.newPlainText(
-                                                "NPatch",
-                                                viewModel.updateLogs.joinToString("\n") { line -> line.second }
+                                if (patchSucceeded) {
+                                    // Explicit install button — installs the just-patched apk
+                                    // (data preserved). Stays available so the user can retry
+                                    // if the system installer dialog fails to appear or gets
+                                    // dismissed by a stray tap.
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.InstallUpdated) },
+                                        content = { Text(stringResource(R.string.install)) }
+                                    )
+                                    Spacer(Modifier.weight(0.2f))
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult) },
+                                        content = { Text(stringResource(R.string.patch_return)) }
+                                    )
+                                } else {
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult) },
+                                        content = { Text(stringResource(R.string.patch_return)) }
+                                    )
+                                    Spacer(Modifier.weight(0.2f))
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = {
+                                            val cm = lspApp.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            cm.setPrimaryClip(
+                                                ClipData.newPlainText(
+                                                    "NPatch",
+                                                    viewModel.updateLogs.joinToString("\n") { line -> line.second }
+                                                )
                                             )
-                                        )
-                                    },
-                                    content = { Text(stringResource(R.string.copy_error)) }
-                                )
+                                        },
+                                        content = { Text(stringResource(R.string.copy_error)) }
+                                    )
+                                }
                             }
                         }
                     }
