@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.lsposed.npatch.Patcher
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.Constants
@@ -280,10 +281,24 @@ class AppManageViewModel : ViewModel() {
                 } else {
                     // Non-Shizuku, single apk only (splits are gated above).
                     if (uninstallFirst && pkg != null) {
+                        logger.i("Uninstalling $pkg — confirm the uninstall prompt...")
                         uninstallApkByPackageName(lspApp, pkg)
+                        // Firing the install intent while the old (different-signature) app is
+                        // still present just fails again with "app not installed". Wait until the
+                        // package is actually gone (user confirmed the uninstall) instead of
+                        // racing two stacked system dialogs.
+                        val removed = withTimeoutOrNull(120_000L) {
+                            while (isPackageInstalled(pkg)) { delay(500) }
+                            true
+                        } ?: false
+                        if (!removed) {
+                            logger.e("Uninstall wasn't completed. Uninstall the app, then tap Install again.")
+                            return@withContext
+                        }
+                        logger.i("Uninstalled. Installing a fresh copy...")
                     }
                     installApk(lspApp, apkFiles.first())
-                    logger.i("Handed to the system installer.")
+                    logger.i("Handed to the system installer — confirm the install prompt.")
                 }
             }
         }.onFailure {
@@ -311,6 +326,15 @@ class AppManageViewModel : ViewModel() {
             return false
         } ?: return false
         return !installedSigner.contentEquals(patchedSigner)
+    }
+
+    private fun isPackageInstalled(pkg: String): Boolean = try {
+        lspApp.packageManager.getPackageInfo(pkg, 0)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    } catch (e: Throwable) {
+        true
     }
 
     private suspend fun performOptimize(appInfo: AppInfo) {
