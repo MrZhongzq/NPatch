@@ -39,6 +39,9 @@
     <string name="manage_incompatible_warning">Old patch — may be incompatible, re-patch recommended</string>
     <string name="manage_update_loader_successfully">Update successfully</string>
     <string name="manage_update_loader_failed">Update failed</string>
+    <string name="manage_uninstall_and_install">Uninstall &amp; install</string>
+    <string name="manage_install_sig_mismatch">The installed app is signed with a different key than this manager, so a data-preserving update isn\'t possible. Uninstall &amp; install (app data will be lost).</string>
+    <string name="manage_install_need_shizuku">This is a split app; the system installer can\'t install it reliably. Grant Shizuku on the home page, then tap Install again.</string>
     <string name="manage_module_scope">Module scope</string>
     <string name="manage_optimize">Optimize</string>
     <string name="manage_optimize_successfully">Optimize successfully</string>

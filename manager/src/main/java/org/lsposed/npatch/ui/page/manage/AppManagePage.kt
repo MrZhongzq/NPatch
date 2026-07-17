@@ -158,17 +158,40 @@ fun AppManageBody(
                                     snackbarHost.showSnackbar(updateFailed)
                                 }
                             }
+                            val installHint = viewModel.installHint
+                            if (patchSucceeded && installHint != AppManageViewModel.InstallHint.NONE) {
+                                Text(
+                                    text = when (installHint) {
+                                        AppManageViewModel.InstallHint.SIGNATURE_MISMATCH ->
+                                            stringResource(R.string.manage_install_sig_mismatch)
+                                        AppManageViewModel.InstallHint.NEED_SHIZUKU_SPLIT ->
+                                            stringResource(R.string.manage_install_need_shizuku)
+                                        else -> ""
+                                    },
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
                             Row(Modifier.padding(top = 12.dp)) {
                                 if (patchSucceeded) {
-                                    // Explicit install button — installs the just-patched apk
-                                    // (data preserved). Stays available so the user can retry
-                                    // if the system installer dialog fails to appear or gets
-                                    // dismissed by a stray tap.
-                                    Button(
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.InstallUpdated) },
-                                        content = { Text(stringResource(R.string.install)) }
-                                    )
+                                    if (installHint == AppManageViewModel.InstallHint.SIGNATURE_MISMATCH) {
+                                        // Data-preserving update is impossible (different key) —
+                                        // offer the uninstall-then-install path instead.
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.InstallUpdatedForce) },
+                                            content = { Text(stringResource(R.string.manage_uninstall_and_install)) }
+                                        )
+                                    } else {
+                                        // Normal install (also the retry after granting Shizuku
+                                        // for split apps, or if the installer dialog didn't show).
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.InstallUpdated) },
+                                            content = { Text(stringResource(R.string.install)) }
+                                        )
+                                    }
                                     Spacer(Modifier.weight(0.2f))
                                     Button(
                                         modifier = Modifier.weight(1f),

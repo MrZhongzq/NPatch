@@ -1,6 +1,7 @@
 package org.lsposed.npatch.ui.viewmodel.manage
 
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -22,12 +23,13 @@ import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.Constants
 import org.lsposed.npatch.share.PatchConfig
 import org.lsposed.npatch.ui.util.installApk
-import org.lsposed.npatch.ui.util.installApks
+import org.lsposed.npatch.ui.util.uninstallApkByPackageName
 import org.lsposed.npatch.ui.viewstate.ProcessingState
 import nkbe.util.NPackageManager
 import nkbe.util.NPackageManager.AppInfo
 import nkbe.util.ShizukuApi
 import org.lsposed.patch.util.Logger
+import java.io.File
 import java.io.FileNotFoundException
 import java.util.zip.ZipFile
 
@@ -41,6 +43,7 @@ class AppManageViewModel : ViewModel() {
     sealed class ViewAction {
         data class UpdateLoader(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
         object InstallUpdated : ViewAction()
+        object InstallUpdatedForce : ViewAction()
         object ClearUpdateLoaderResult : ViewAction()
         data class PerformOptimize(val appInfo: AppInfo) : ViewAction()
         object ClearOptimizeResult : ViewAction()
@@ -59,6 +62,14 @@ class AppManageViewModel : ViewModel() {
 
     var optimizeState: ProcessingState<Boolean> by mutableStateOf(ProcessingState.Idle)
         private set
+
+    // Extra guidance shown on the re-patch completion screen's install step.
+    enum class InstallHint { NONE, SIGNATURE_MISMATCH, NEED_SHIZUKU_SPLIT }
+    var installHint: InstallHint by mutableStateOf(InstallHint.NONE)
+        private set
+
+    // Package name of the app being re-patched, used by the install step.
+    private var updatingPackage: String? = null
 
     // Live re-patch log lines (level to message), rendered full-screen while re-patching so
     // the user sees real progress/errors instead of a bare spinner. Declared before `logger`
@@ -107,8 +118,12 @@ class AppManageViewModel : ViewModel() {
         viewModelScope.launch {
             when (action) {
                 is ViewAction.UpdateLoader -> updateLoader(action.appInfo, action.config)
-                is ViewAction.InstallUpdated -> installUpdatedApp()
-                is ViewAction.ClearUpdateLoaderResult -> updateLoaderState = ProcessingState.Idle
+                is ViewAction.InstallUpdated -> installUpdatedApp(uninstallFirst = false)
+                is ViewAction.InstallUpdatedForce -> installUpdatedApp(uninstallFirst = true)
+                is ViewAction.ClearUpdateLoaderResult -> {
+                    updateLoaderState = ProcessingState.Idle
+                    installHint = InstallHint.NONE
+                }
                 is ViewAction.PerformOptimize -> performOptimize(action.appInfo)
                 is ViewAction.ClearOptimizeResult -> optimizeState = ProcessingState.Idle
                 is ViewAction.Refresh -> {
@@ -147,6 +162,8 @@ class AppManageViewModel : ViewModel() {
     private suspend fun updateLoader(appInfo: AppInfo, config: PatchConfig) {
         Log.i(TAG, "Update loader for ${appInfo.app.packageName}")
         updateLogs.clear()
+        updatingPackage = appInfo.app.packageName
+        installHint = InstallHint.NONE
         logger.i("Re-patching ${appInfo.label} (${appInfo.app.packageName})")
         updateLoaderState = ProcessingState.Processing
         val result = runCatching {
@@ -155,22 +172,36 @@ class AppManageViewModel : ViewModel() {
                     cleanTmpApkDir()
                     cleanExternalTmpApkDir()
                 }
-                val apkPaths = listOf(appInfo.app.sourceDir) + (appInfo.app.splitSourceDirs ?: emptyArray())
+                val basePath = appInfo.app.sourceDir
+                val splitPaths = (appInfo.app.splitSourceDirs ?: emptyArray()).toList()
                 val patchPaths = mutableListOf<String>()
                 val embeddedModulePaths = mutableListOf<String>()
-                for (apk in apkPaths) {
-                    ZipFile(apk).use { zip ->
-                        var entry = zip.getEntry(Constants.ORIGINAL_APK_ASSET_PATH)
-                        if (entry == null) entry = zip.getEntry("assets/npatch/origin_apk.bin")
-                        if (entry == null) throw FileNotFoundException("Original apk entry not found for $apk")
-                        zip.getInputStream(entry).use { input ->
-                            val dst = lspApp.tmpApkDir.resolve(apk.substringAfterLast('/'))
-                            patchPaths.add(dst.absolutePath)
-                            dst.outputStream().use { output ->
-                                input.copyTo(output)
-                            }
+                // Only the BASE apk embeds the original apk (assets/npatch/origin.apk). Splits
+                // are never given an embedded origin, so requiring one in every apk broke
+                // re-patching split apps ("Original apk entry not found"). Extract origin from
+                // the base; for splits, feed the installed split back directly — it is the
+                // original split content (re-signed), which the patcher re-processes (skipSplit)
+                // and re-signs consistently with the base.
+                ZipFile(basePath).use { zip ->
+                    var entry = zip.getEntry(Constants.ORIGINAL_APK_ASSET_PATH)
+                    if (entry == null) entry = zip.getEntry("assets/npatch/origin_apk.bin")
+                    if (entry == null) throw FileNotFoundException("Original apk entry not found for base $basePath")
+                    zip.getInputStream(entry).use { input ->
+                        val dst = lspApp.tmpApkDir.resolve(basePath.substringAfterLast('/'))
+                        patchPaths.add(dst.absolutePath)
+                        dst.outputStream().use { output ->
+                            input.copyTo(output)
                         }
                     }
+                }
+                splitPaths.forEach { split ->
+                    val dst = lspApp.tmpApkDir.resolve(split.substringAfterLast('/'))
+                    File(split).inputStream().use { input ->
+                        dst.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    patchPaths.add(dst.absolutePath)
                 }
                 ZipFile(appInfo.app.sourceDir).use { zip ->
                     zip.entries().iterator().forEach { entry ->
@@ -205,32 +236,81 @@ class AppManageViewModel : ViewModel() {
         updateLoaderState = ProcessingState.Done(result)
     }
 
-    // Triggered by the explicit "Install" button on the re-patch completion screen. Installs
-    // the just-patched apk(s) (kept in lspApp.targetApkFiles) as an update, preserving data.
-    // Callable repeatedly so the user can retry if the system installer dialog didn't appear.
-    private suspend fun installUpdatedApp() {
+    // Triggered by the "Install" button on the re-patch completion screen. Installs the
+    // just-patched apk(s) (kept in lspApp.targetApkFiles) as an update, preserving data.
+    // Two pre-checks match the two failure modes we hit in the field:
+    //  - Split apps: the system installer can't reliably install multiple apks, so require
+    //    Shizuku and prompt for it when it isn't granted.
+    //  - Signature mismatch: if the installed app was patched with a different key, a
+    //    data-preserving update install fails ("signatures do not match"). Detect it up front
+    //    by comparing the installed signer with the freshly-patched apk's signer, and offer an
+    //    explicit "Uninstall & install" action instead of a cryptic system failure.
+    private suspend fun installUpdatedApp(uninstallFirst: Boolean = false) {
         val apkFiles = lspApp.targetApkFiles
         if (apkFiles.isNullOrEmpty()) {
             logger.e("No patched APK files to install")
             return
         }
-        logger.i("Installing ${apkFiles.size} apk(s)...")
+        val pkg = updatingPackage
+        if (apkFiles.size > 1 && !ShizukuApi.isPermissionGranted) {
+            installHint = InstallHint.NEED_SHIZUKU_SPLIT
+            logger.e("This is a split app; the system installer can't install it reliably. Grant Shizuku, then tap Install again.")
+            return
+        }
+        val signerDiffers = if (!uninstallFirst && pkg != null) {
+            withContext(Dispatchers.IO) { installedSignerDiffersFrom(pkg, apkFiles.first().absolutePath) }
+        } else false
+        if (signerDiffers) {
+            installHint = InstallHint.SIGNATURE_MISMATCH
+            logger.e("The installed app is signed with a different key than this manager. A data-preserving update isn't possible — choose \"Uninstall & install\" (app data will be lost).")
+            return
+        }
+        installHint = InstallHint.NONE
+        logger.i(if (uninstallFirst) "Uninstalling then installing ${apkFiles.size} apk(s)..." else "Installing ${apkFiles.size} apk(s)...")
         runCatching {
             withContext(Dispatchers.IO) {
-                if (!ShizukuApi.isPermissionGranted) {
-                    if (apkFiles.size > 1) {
-                        installApks(lspApp, apkFiles)
-                    } else {
-                        installApk(lspApp, apkFiles.first())
+                if (ShizukuApi.isPermissionGranted) {
+                    if (uninstallFirst && pkg != null) {
+                        val (uStatus, uMessage) = NPackageManager.uninstall(pkg)
+                        logger.i("Uninstall status=$uStatus $uMessage")
                     }
-                } else {
                     val (status, message) = NPackageManager.install()
-                    if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message)
+                    if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message ?: "install failed")
+                    logger.i("Installed via Shizuku")
+                } else {
+                    // Non-Shizuku, single apk only (splits are gated above).
+                    if (uninstallFirst && pkg != null) {
+                        uninstallApkByPackageName(lspApp, pkg)
+                    }
+                    installApk(lspApp, apkFiles.first())
+                    logger.i("Handed to the system installer.")
                 }
             }
         }.onFailure {
             logger.e("Install failed: ${it.message}")
         }
+    }
+
+    // True only when the app IS currently installed AND its signing certificate differs from
+    // the freshly-patched apk's — i.e. an update install would be rejected for signature
+    // mismatch. Returns false (proceed) when not installed or on any lookup error.
+    private fun installedSignerDiffersFrom(pkg: String, patchedApkPath: String): Boolean {
+        val pm = lspApp.packageManager
+        val installedSigner = try {
+            pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+        } catch (e: PackageManager.NameNotFoundException) {
+            return false
+        } catch (e: Throwable) {
+            return false
+        } ?: return false
+        val patchedSigner = try {
+            pm.getPackageArchiveInfo(patchedApkPath, PackageManager.GET_SIGNING_CERTIFICATES)
+                ?.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+        } catch (e: Throwable) {
+            return false
+        } ?: return false
+        return !installedSigner.contentEquals(patchedSigner)
     }
 
     private suspend fun performOptimize(appInfo: AppInfo) {

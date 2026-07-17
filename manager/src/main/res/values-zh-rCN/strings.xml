@@ -38,6 +38,9 @@
     <string name="manage_incompatible_warning">旧版修补，可能不兼容，建议重新修补</string>
     <string name="manage_update_loader_successfully">更新成功</string>
     <string name="manage_update_loader_failed">更新失败</string>
+    <string name="manage_uninstall_and_install">卸载并安装</string>
+    <string name="manage_install_sig_mismatch">当前应用与本管理器的签名不一致，无法保留数据更新。请选择卸载并安装（会丢失应用数据）。</string>
+    <string name="manage_install_need_shizuku">分包应用无法用系统安装器可靠安装。请在首页授权 Shizuku 后再次点击安装。</string>
     <string name="manage_module_scope">模块作用域</string>
     <string name="manage_optimize">优化</string>
     <string name="manage_optimize_successfully">优化成功</string>
