@@ -4,6 +4,7 @@ import android.content.pm.PackageInstaller
 import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -58,17 +59,27 @@ class AppManageViewModel : ViewModel() {
     var optimizeState: ProcessingState<Boolean> by mutableStateOf(ProcessingState.Idle)
         private set
 
+    // Live re-patch log lines (level to message), rendered full-screen while re-patching so
+    // the user sees real progress/errors instead of a bare spinner. Declared before `logger`
+    // because the logger appends to it during construction.
+    val updateLogs = mutableStateListOf<Pair<Int, String>>()
+
     private val logger = object : Logger() {
         override fun d(msg: String) {
-            if (verbose) Log.d(TAG, msg)
+            if (verbose) {
+                Log.d(TAG, msg)
+                updateLogs += Log.DEBUG to msg
+            }
         }
 
         override fun i(msg: String) {
             Log.i(TAG, msg)
+            updateLogs += Log.INFO to msg
         }
 
         override fun e(msg: String) {
             Log.e(TAG, msg)
+            updateLogs += Log.ERROR to msg
         }
     }
 
@@ -133,6 +144,8 @@ class AppManageViewModel : ViewModel() {
 
     private suspend fun updateLoader(appInfo: AppInfo, config: PatchConfig) {
         Log.i(TAG, "Update loader for ${appInfo.app.packageName}")
+        updateLogs.clear()
+        logger.i("Re-patching ${appInfo.label} (${appInfo.app.packageName})")
         updateLoaderState = ProcessingState.Processing
         val result = runCatching {
             withContext(Dispatchers.IO) {
@@ -187,6 +200,12 @@ class AppManageViewModel : ViewModel() {
                     if (status != PackageInstaller.STATUS_SUCCESS) throw RuntimeException(message)
                 }
             }
+        }
+        result.onSuccess {
+            logger.i("Re-patch finished successfully")
+        }.onFailure {
+            logger.e(it.message ?: it.toString())
+            logger.e(it.stackTraceToString())
         }
         updateLoaderState = ProcessingState.Done(result)
     }

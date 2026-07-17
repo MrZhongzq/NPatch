@@ -7,11 +7,15 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Warning
@@ -20,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -27,6 +32,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,25 +94,93 @@ fun AppManageBody(
         }
     }
 
-    when (viewModel.updateLoaderState) {
-        is ProcessingState.Idle -> Unit
-        is ProcessingState.Processing -> LoadingDialog()
-        is ProcessingState.Done -> {
-            val it = viewModel.updateLoaderState as ProcessingState.Done
+    run {
+        val updateState = viewModel.updateLoaderState
+        if (updateState !is ProcessingState.Idle) {
+            val done = updateState as? ProcessingState.Done
             val updateSuccessfully = stringResource(R.string.manage_update_loader_successfully)
             val updateFailed = stringResource(R.string.manage_update_loader_failed)
-            val copyError = stringResource(R.string.copy_error)
-            LaunchedEffect(Unit) {
-                it.result.onSuccess {
-                    snackbarHost.showSnackbar(updateSuccessfully)
-                }.onFailure {
-                    val result = snackbarHost.showSnackbar(updateFailed, copyError)
-                    if (result == SnackbarResult.ActionPerformed) {
-                        val cm = lspApp.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("NPatch", it.toString()))
+            Dialog(
+                onDismissRequest = {
+                    if (done != null) viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult)
+                },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    dismissOnClickOutside = false
+                )
+            ) {
+                // Block back while patching so the user can't leave mid-operation.
+                if (done == null) BackHandler {}
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                    Column(Modifier.fillMaxSize().padding(20.dp)) {
+                        Text(
+                            text = stringResource(R.string.manage_update_loader),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontFamily = FontFamily.Serif,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        ProvideTextStyle(
+                            MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                        ) {
+                            val scrollState = rememberLazyListState()
+                            LazyColumn(
+                                state = scrollState,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                            ) {
+                                items(viewModel.updateLogs) {
+                                    when (it.first) {
+                                        Log.ERROR -> Text(it.second, color = MaterialTheme.colorScheme.error)
+                                        else -> Text(it.second)
+                                    }
+                                }
+                            }
+                            LaunchedEffect(viewModel.updateLogs.size) {
+                                if (viewModel.updateLogs.isNotEmpty()) {
+                                    scrollState.animateScrollToItem(viewModel.updateLogs.size - 1)
+                                }
+                            }
+                        }
+                        if (done == null) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                            )
+                        } else {
+                            LaunchedEffect(Unit) {
+                                done.result.onSuccess {
+                                    snackbarHost.showSnackbar(updateSuccessfully)
+                                }.onFailure {
+                                    snackbarHost.showSnackbar(updateFailed)
+                                }
+                            }
+                            Row(Modifier.padding(top = 12.dp)) {
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult) },
+                                    content = { Text(stringResource(R.string.patch_return)) }
+                                )
+                                Spacer(Modifier.weight(0.2f))
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val cm = lspApp.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        cm.setPrimaryClip(
+                                            ClipData.newPlainText(
+                                                "NPatch",
+                                                viewModel.updateLogs.joinToString("\n") { line -> line.second }
+                                            )
+                                        )
+                                    },
+                                    content = { Text(stringResource(R.string.copy_error)) }
+                                )
+                            }
+                        }
                     }
                 }
-                viewModel.dispatch(AppManageViewModel.ViewAction.ClearUpdateLoaderResult)
             }
         }
     }
