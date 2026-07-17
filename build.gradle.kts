@@ -30,6 +30,14 @@ val commitCount = run {
     Git(repo).log().add(refId).call().count()
 }
 
+// Short hash of the currently built commit — used as the human-facing version name instead
+// of a hardcoded "x.y.z", so it always reflects exactly which commit produced the build.
+val commitHash = run {
+    FileRepository(rootProject.file(".git")).runCatching {
+        use { repo -> repo.resolve("HEAD")?.abbreviate(7)?.name() }
+    }.getOrNull() ?: "unknown"
+}
+
 val (coreCommitCount, coreLatestTag) = FileRepositoryBuilder().setGitDir(rootProject.file(".git/modules/core"))
     .runCatching {
         build().use { repo ->
@@ -47,9 +55,9 @@ val (coreCommitCount, coreLatestTag) = FileRepositoryBuilder().setGitDir(rootPro
 
 // sync from https://github.com/JingMartix/LSPosed/blob/master/build.gradle.kts
 val defaultManagerPackageName by extra("org.lsposed.npatch")
-val apiCode by extra(100)
+val apiCode by extra(102)
 val verCode by extra(commitCount)
-val verName by extra("0.8.0")
+val verName by extra(commitHash)
 val coreVerCode by extra(coreCommitCount)
 val coreVerName by extra(coreLatestTag)
 // Provider<String> extras required by upstream core/core/build.gradle.kts (Vector v2.0)
