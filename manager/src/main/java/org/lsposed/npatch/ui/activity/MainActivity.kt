@@ -95,6 +95,18 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+        // Android 13+ (TIRAMISU): POST_NOTIFICATIONS is a runtime permission. Without it the
+        // KeepAlive foreground-service notification is silently suppressed (no prompt, no warning),
+        // so request it up front. Once granted the service's periodic re-post shows it within ~15s.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                1002
+            )
+        }
     }
 }
 

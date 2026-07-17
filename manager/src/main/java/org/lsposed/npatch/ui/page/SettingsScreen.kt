@@ -2,6 +2,10 @@ package org.lsposed.npatch.ui.page
 
 import android.app.Activity
 import android.content.Intent
+import android.provider.Settings
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -257,20 +261,55 @@ private fun KeyStore() {
 @Composable
 private fun KeepAliveToggle() {
     val context = LocalContext.current
-    SettingsSwitch(
-        modifier = Modifier.clickable {
-            Configs.keepAlive = !Configs.keepAlive
-            if (Configs.keepAlive) {
-                KeepAliveService.start(context)
-            } else {
-                KeepAliveService.stop(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // Re-check on resume so the warning clears right after the user grants the permission.
+    var notifEnabled by remember { mutableStateOf(KeepAliveService.notificationsEnabled(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notifEnabled = KeepAliveService.notificationsEnabled(context)
             }
-        },
-        checked = Configs.keepAlive,
-        icon = Icons.Outlined.NotificationsActive,
-        title = stringResource(R.string.settings_keep_alive),
-        desc = stringResource(R.string.settings_keep_alive_desc)
-    )
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Column {
+        SettingsSwitch(
+            modifier = Modifier.clickable {
+                Configs.keepAlive = !Configs.keepAlive
+                if (Configs.keepAlive) {
+                    KeepAliveService.start(context)
+                } else {
+                    KeepAliveService.stop(context)
+                }
+            },
+            checked = Configs.keepAlive,
+            icon = Icons.Outlined.NotificationsActive,
+            title = stringResource(R.string.settings_keep_alive),
+            desc = stringResource(R.string.settings_keep_alive_desc)
+        )
+        // KeepAlive relies on an ongoing notification; without notification permission it runs
+        // invisibly and is easier for the system to kill. Warn instead of failing silently.
+        if (Configs.keepAlive && !notifEnabled) {
+            Text(
+                text = stringResource(R.string.settings_keep_alive_no_notification),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            )
+                        }
+                    }
+                    .padding(start = 56.dp, end = 16.dp, bottom = 12.dp)
+            )
+        }
+    }
 }
 
 @Composable

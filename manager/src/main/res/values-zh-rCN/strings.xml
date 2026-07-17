@@ -99,6 +99,7 @@
     <string name="screen_select_apps">选择应用程序</string>
     <!-- Settings Screen -->
     <string name="screen_settings">设置</string>
+    <string name="settings_keep_alive_no_notification">⚠ 未授予通知权限——保活通知无法显示,保活可能不稳定。点此去授权。</string>
     <string name="settings_keystore">签名密钥库</string>
     <string name="settings_keystore_default">内置</string>
     <string name="settings_keystore_custom">自定义</string>

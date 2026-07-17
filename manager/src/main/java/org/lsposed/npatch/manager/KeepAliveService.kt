@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,7 +31,17 @@ class KeepAliveService : Service() {
         private const val NOTIFICATION_CHECK_INTERVAL_MS = 15_000L
         private const val MIRROR_SYNC_INTERVAL_MS = 30_000L
 
+        // Whether the user has allowed notifications for the manager. On Android 13+ this needs
+        // the POST_NOTIFICATIONS runtime permission; when it's off the keep-alive foreground
+        // notification is silently suppressed (the service may still run but is invisible and
+        // easier for the system to kill), so callers should surface this to the user.
+        fun notificationsEnabled(context: Context): Boolean =
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+
         fun start(context: Context) {
+            if (!notificationsEnabled(context)) {
+                Log.w("NPatch-KeepAlive", "Notifications are disabled — the keep-alive notification won't be shown; keep-alive may be unreliable.")
+            }
             try {
                 context.startForegroundService(Intent(context, KeepAliveService::class.java))
             } catch (e: Throwable) {

@@ -139,6 +139,7 @@
     <!-- Foreground Service -->
     <string name="settings_keep_alive">Keep alive notification</string>
     <string name="settings_keep_alive_desc">Show a persistent notification to prevent being killed by the system</string>
+    <string name="settings_keep_alive_no_notification">⚠ Notification permission is off — the keep-alive notification can\'t be shown and keep-alive may be unreliable. Tap to grant.</string>
     <string name="notification_channel_keepalive">Keep Alive</string>
     <string name="notification_keepalive_title">NPatch is running</string>
     <string name="notification_keepalive_text">Keeping patched apps and data mirrors available</string>
