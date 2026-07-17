@@ -44,6 +44,7 @@ class AppManageViewModel : ViewModel() {
     sealed class ViewAction {
         data class UpdateLoader(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
         data class ResignLv3(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
+        data class ConvertMode(val appInfo: AppInfo, val config: PatchConfig) : ViewAction()
         object InstallUpdated : ViewAction()
         object InstallUpdatedForce : ViewAction()
         object ClearUpdateLoaderResult : ViewAction()
@@ -132,6 +133,19 @@ class AppManageViewModel : ViewModel() {
                     )
                     updateLoader(action.appInfo, lv3)
                 }
+                is ViewAction.ConvertMode -> {
+                    // Switch between integrated (useManager=false) and local/manager mode
+                    // (useManager=true) by re-patching with the flag toggled, preserving all
+                    // other options; update-install keeps app data.
+                    val c = action.config
+                    val toManager = !c.useManager
+                    val converted = PatchConfig(
+                        toManager, c.debuggable, c.overrideVersionCode, c.sigBypassLevel,
+                        c.originalSignature, c.appComponentFactory, c.injectProvider,
+                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms
+                    )
+                    updateLoader(action.appInfo, converted, dropEmbeddedModules = toManager)
+                }
                 is ViewAction.InstallUpdated -> installUpdatedApp(uninstallFirst = false)
                 is ViewAction.InstallUpdatedForce -> installUpdatedApp(uninstallFirst = true)
                 is ViewAction.ClearUpdateLoaderResult -> {
@@ -173,7 +187,7 @@ class AppManageViewModel : ViewModel() {
         if (!silent) isRefreshing = false
     }
 
-    private suspend fun updateLoader(appInfo: AppInfo, config: PatchConfig) {
+    private suspend fun updateLoader(appInfo: AppInfo, config: PatchConfig, dropEmbeddedModules: Boolean = false) {
         Log.i(TAG, "Update loader for ${appInfo.app.packageName}")
         updateLogs.clear()
         updatingPackage = appInfo.app.packageName
@@ -217,14 +231,18 @@ class AppManageViewModel : ViewModel() {
                     }
                     patchPaths.add(dst.absolutePath)
                 }
-                ZipFile(appInfo.app.sourceDir).use { zip ->
-                    zip.entries().iterator().forEach { entry ->
-                        if (entry.name.startsWith(Constants.EMBEDDED_MODULES_ASSET_PATH)) {
-                            val dst = lspApp.tmpApkDir.resolve(entry.name.substringAfterLast('/'))
-                            embeddedModulePaths.add(dst.absolutePath)
-                            zip.getInputStream(entry).use { input ->
-                                dst.outputStream().use { output ->
-                                    input.copyTo(output)
+                // Manager mode can't carry embedded modules, so when converting integrated -> local
+                // we skip re-embedding them (the app then uses the manager's module scope instead).
+                if (!dropEmbeddedModules) {
+                    ZipFile(appInfo.app.sourceDir).use { zip ->
+                        zip.entries().iterator().forEach { entry ->
+                            if (entry.name.startsWith(Constants.EMBEDDED_MODULES_ASSET_PATH)) {
+                                val dst = lspApp.tmpApkDir.resolve(entry.name.substringAfterLast('/'))
+                                embeddedModulePaths.add(dst.absolutePath)
+                                zip.getInputStream(entry).use { input ->
+                                    dst.outputStream().use { output ->
+                                        input.copyTo(output)
+                                    }
                                 }
                             }
                         }

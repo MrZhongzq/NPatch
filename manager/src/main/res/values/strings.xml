@@ -93,6 +93,8 @@
     <string name="patch_lv4_force">Keep lv4</string>
     <string name="manage_lv4_incompatible_warning">lv4 may be incompatible with this app — re-sign with lv3 if it crashes</string>
     <string name="manage_resign_lv3">Re-sign with lv3</string>
+    <string name="manage_convert_to_local">Convert to local (manager) mode</string>
+    <string name="manage_convert_to_integrated">Convert to integrated mode</string>
     <string name="patch_return">Return</string>
     <string name="patch_uninstall_text">Due to different signatures, you need to uninstall the original app before installing the patched one.\nMake sure you have backed up personal data.</string>
     <string name="patch_install_successfully">Install successfully</string>

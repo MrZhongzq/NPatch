@@ -89,6 +89,8 @@
     <string name="patch_lv4_force">仍用 lv4</string>
     <string name="manage_lv4_incompatible_warning">lv4 可能與此應用不相容——若崩潰請用 lv3 重新簽章</string>
     <string name="manage_resign_lv3">使用 lv3 重新簽章</string>
+    <string name="manage_convert_to_local">轉換為本地模式</string>
+    <string name="manage_convert_to_integrated">轉換為整合模式</string>
     <string name="patch_return">返回</string>
     <string name="patch_uninstall_text">由於簽名不同，安裝前需要先解除安裝原程式。\n確保您已備份好個人資料。</string>
     <string name="patch_install_successfully">安裝成功</string>

@@ -396,6 +396,24 @@ fun AppManageBody(
                                 }
                             }
                         )
+                        // Convert between integrated (集成) and local/manager (本地) mode by
+                        // re-patching with useManager toggled (data-preserving update install).
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(
+                                        if (patchConfig.useManager) R.string.manage_convert_to_integrated
+                                        else R.string.manage_convert_to_local
+                                    )
+                                )
+                            },
+                            onClick = {
+                                expanded = false
+                                scope.launch {
+                                    viewModel.dispatch(AppManageViewModel.ViewAction.ConvertMode(appInfo, patchConfig))
+                                }
+                            }
+                        )
                         if (patchConfig.useManager) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.manage_module_scope)) },
