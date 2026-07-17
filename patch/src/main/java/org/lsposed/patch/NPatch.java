@@ -119,6 +119,9 @@ public class NPatch {
     @Parameter(names = {"--installerSource"}, description = "Original app installer source (e.g. Google Play, Samsung Galaxy Store)")
     private String installerSource = "";
 
+    @Parameter(names = {"--originalSignature"}, description = "Pre-known original signature to embed instead of reading it from the input apk. Used when re-patching, where the embedded origin.apk had its v2/v3 signature stripped (mirror / provider mode) and can no longer be read back.")
+    private String providedOriginalSignature = "";
+
     @Parameter(names = {"--useNPatchGms"}, description = "Redirect GMS calls to NPatch built-in MicroG")
     private boolean useNPatchGms = false;
 
@@ -301,11 +304,21 @@ public class NPatch {
 
             String originalSignature = null;
             if (sigbypassLevel > Constants.SIGBYPASS_LV_DISABLE) {
-                originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
-                if (originalSignature == null || originalSignature.isEmpty()) {
-                    throw new PatchError("get original signature failed");
+                if (providedOriginalSignature != null && !providedOriginalSignature.isEmpty()) {
+                    // Re-patch path: the caller (manager) already knows the genuine original
+                    // signature from the stored config. The embedded origin.apk may have had its
+                    // v2/v3 signature stripped when it was rebuilt for mirror / provider mode, so
+                    // reading it back would fail ("get original signature failed"). Trust the
+                    // supplied value instead of re-deriving it.
+                    originalSignature = providedOriginalSignature;
+                    logger.d("Using provided original signature (re-patch)");
+                } else {
+                    originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
+                    if (originalSignature == null || originalSignature.isEmpty()) {
+                        throw new PatchError("get original signature failed");
+                    }
+                    logger.d("Original signature\n" + originalSignature);
                 }
-                logger.d("Original signature\n" + originalSignature);
             }
 
             // copy out manifest file from zlib

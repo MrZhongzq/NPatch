@@ -42,6 +42,13 @@ object Patcher {
                 if (config.installerSource != null && config.installerSource.isNotEmpty()) {
                     add("--installerSource"); add(config.installerSource)
                 }
+                // When re-patching, the config carries the genuine original signature captured
+                // at first patch. Pass it through so NPatch doesn't try to re-read it from the
+                // embedded origin.apk, whose v2/v3 signature was stripped for mirror/provider
+                // mode ("get original signature failed"). Fresh patches leave this empty.
+                if (!config.originalSignature.isNullOrEmpty()) {
+                    add("--originalSignature"); add(config.originalSignature)
+                }
                 if (config.useNPatchGms) add("--useNPatchGms")
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
