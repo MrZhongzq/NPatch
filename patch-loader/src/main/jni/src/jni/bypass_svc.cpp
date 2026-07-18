@@ -178,6 +178,42 @@ namespace vector::native {
         return false;
     }
 
+    // DIAGNOSTIC: scan a single maps region for framework keywords and log if found.
+    static void diag_scan_region(int mem_fd, const char* line, size_t len, size_t* budget) {
+        if (mem_fd < 0 || *budget == 0) return;
+        char* endp = nullptr;
+        unsigned long long start = strtoull(line, &endp, 16);
+        if (endp == line || *endp != '-') return;
+        unsigned long long end = strtoull(endp + 1, &endp, 16);
+        if (*endp != ' ' || end <= start) return;
+        const char* perms = endp + 1;
+        if (perms[0] != 'r') return;  // unreadable
+        size_t region_size = static_cast<size_t>(end - start);
+        size_t to_read = region_size < *budget ? region_size : *budget;
+        static const char* kw[] = {"lsposed", "npatch", "riru", "zygisk", "xposed", "LSPosed", nullptr};
+        char chunk[65536];
+        std::string tail;
+        size_t off = 0;
+        bool found = false;
+        while (off < to_read && !found) {
+            size_t n = to_read - off;
+            if (n > sizeof(chunk)) n = sizeof(chunk);
+            ssize_t got = pread(mem_fd, chunk, n, static_cast<off_t>(start + off));
+            if (got <= 0) break;
+            std::string hay = tail;
+            hay.append(chunk, static_cast<size_t>(got));
+            for (int i = 0; kw[i]; ++i) if (hay.find(kw[i]) != std::string::npos) { found = true; break; }
+            size_t keep = hay.size() < 16 ? hay.size() : 16;
+            tail.assign(hay.data() + hay.size() - keep, keep);
+            off += static_cast<size_t>(got);
+        }
+        *budget = (*budget > off) ? (*budget - off) : 0;
+        if (found) {
+            std::string l(line, len > 0 && line[len - 1] == '\n' ? len - 1 : len);
+            LOGI("SvcBypass: KEYWORD region size={} '{}'", region_size, l.c_str());
+        }
+    }
+
     static int build_filtered_proc_fd(const char* path) {
         int real_fd = openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
         if (real_fd < 0) return -1;
@@ -187,6 +223,10 @@ namespace vector::native {
         while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
         close(real_fd);
 
+        // Diagnostic keyword scan (log only), with a total byte budget to avoid ANR.
+        int mem_fd = openat(AT_FDCWD, "/proc/self/mem", O_RDONLY | O_CLOEXEC);
+        size_t scan_budget = 64u * 1024u * 1024u;
+
         std::string out;
         out.reserve(content.size());
         size_t start = 0;
@@ -195,9 +235,13 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
-            if (!maps_line_is_suspicious(line, len)) out.append(line, len);
+            if (!maps_line_is_suspicious(line, len)) {
+                diag_scan_region(mem_fd, line, len, &scan_budget);
+                out.append(line, len);
+            }
             start = end;
         }
+        if (mem_fd >= 0) close(mem_fd);
 
         int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
         if (mfd < 0) return -1;
