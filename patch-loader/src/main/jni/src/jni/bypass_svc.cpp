@@ -53,6 +53,31 @@ namespace vector::native {
     static std::mutex g_path_mutex;
     static thread_local std::string g_redirect_buffer;
 
+    // Records overlay memfds we hand back for library opens, so readlinkat("/proc/self/fd/N")
+    // can be spoofed back to the real library path (otherwise the detector sees "/memfd:..." and
+    // knows the fd was substituted).
+    static std::mutex g_overlay_fd_mutex;
+    static int g_overlay_fd[64] = {0};
+    static char g_overlay_fd_path[64][PATH_MAX] = {{0}};
+    static int g_overlay_fd_seq = 0;
+
+    static void record_overlay_fd(int fd, const char* path) {
+        std::scoped_lock lock(g_overlay_fd_mutex);
+        int idx = g_overlay_fd_seq % 64;
+        g_overlay_fd[idx] = fd;
+        strncpy(g_overlay_fd_path[idx], path, PATH_MAX - 1);
+        g_overlay_fd_path[idx][PATH_MAX - 1] = '\0';
+        g_overlay_fd_seq++;
+    }
+
+    static const char* lookup_overlay_fd(int fd) {
+        std::scoped_lock lock(g_overlay_fd_mutex);
+        for (int i = 0; i < 64; ++i) {
+            if (g_overlay_fd[i] == fd && g_overlay_fd_path[i][0] != '\0') return g_overlay_fd_path[i];
+        }
+        return nullptr;
+    }
+
     static void copy_path(char* dest, const char* src) {
         if (src == nullptr) {
             dest[0] = '\0';
@@ -310,6 +335,7 @@ namespace vector::native {
                     int fd = build_lib_overlay_fd(pathname);
                     LOGI("SvcBypass: lib overlay for '{}' -> fd={}", pathname, fd);
                     if (fd >= 0) {
+                        record_overlay_fd(fd, pathname);
                         req->result = fd;
                         handled = true;
                     }
@@ -339,7 +365,25 @@ namespace vector::native {
                 char* outbuf = reinterpret_cast<char*>(req->args[2]);
                 size_t bufsiz = static_cast<size_t>(req->args[3]);
                 size_t n = static_cast<size_t>(req->result);
+                const char* linkpath = reinterpret_cast<const char*>(req->args[1]);
                 if (outbuf != nullptr && n <= bufsiz) {
+                    // A) readlinkat("/proc/self/fd/<N>"): if N is an overlay memfd we handed back
+                    //    for a library open, report the real library path (not "/memfd:...").
+                    if (linkpath != nullptr && strncmp(linkpath, "/proc/self/fd/", 14) == 0) {
+                        int fdnum = atoi(linkpath + 14);
+                        LOGI("SvcBypass: readlinkat /proc/self/fd/{} -> len={}", fdnum, n);
+                        const char* real = lookup_overlay_fd(fdnum);
+                        if (real != nullptr) {
+                            size_t rlen = strlen(real);
+                            if (rlen > 0 && rlen <= bufsiz) {
+                                memcpy(outbuf, real, rlen);
+                                req->result = static_cast<long>(rlen);
+                                n = rlen;
+                                LOGI("SvcBypass: spoofed fd link -> '{}'", real);
+                            }
+                        }
+                    }
+                    // B) any link resolving into our cached origin apk -> report the installed apk.
                     std::scoped_lock lock(g_path_mutex);
                     if (g_target_path[0] != '\0'
                             && memmem(outbuf, n, "/npatch/origin/", 15) != nullptr) {
