@@ -332,13 +332,11 @@ namespace vector::native {
                         handled = true;
                     }
                 } else if (is_integrity_checked_lib(pathname)) {
-                    int fd = build_lib_overlay_fd(pathname);
-                    LOGI("SvcBypass: lib overlay for '{}' -> fd={}", pathname, fd);
-                    if (fd >= 0) {
-                        record_overlay_fd(fd, pathname);
-                        req->result = fd;
-                        handled = true;
-                    }
+                    // DIAGNOSTIC: deny the library open to learn whether the detector reads its
+                    // disk_crc through this openat at all.
+                    LOGI("SvcBypass: denying integrity lib open '{}' (diag)", pathname);
+                    req->result = -EACCES;
+                    handled = true;
                 }
             }
 
