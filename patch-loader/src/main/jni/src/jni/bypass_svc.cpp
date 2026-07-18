@@ -295,7 +295,13 @@ namespace vector::native {
                         || strstr(pathname, "map_files") || strstr(pathname, "pagemap"))) {
                     LOGI("SvcBypass: openat probe path='{}'", pathname);
                 }
-                if (is_hideable_maps_path(pathname)) {
+                // DIAGNOSTIC: deny /proc/self/mem to learn whether the detector's mem-side
+                // checks (lib integrity, keyword scan) rely on it.
+                if (pathname != nullptr && strcmp(pathname, "/proc/self/mem") == 0) {
+                    LOGI("SvcBypass: denying /proc/self/mem (diag)");
+                    req->result = -EACCES;
+                    handled = true;
+                } else if (is_hideable_maps_path(pathname)) {
                     int fd = build_filtered_proc_fd(pathname);
                     if (fd >= 0) {
                         req->result = fd;
