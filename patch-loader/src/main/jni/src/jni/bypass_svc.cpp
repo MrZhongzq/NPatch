@@ -160,7 +160,15 @@ namespace vector::native {
     static bool maps_line_is_suspicious(const char* line, size_t len) {
         static const char* kNames[] = {
                 "npatch", "lsposed", "riru", "zygisk", "magisk", "frida",
-                "/data/adb", "/data/local/tmp", "memfd:", nullptr};
+                "/data/adb", "/data/local/tmp", "memfd:",
+                // ART Java heap object spaces: they hold the framework's class-name strings
+                // ("xposed"/"lsposed") that memory keyword scanners flag. The app reaches its
+                // own heap through object pointers, not through /proc/self/maps, so removing
+                // these lines from the maps view doesn't affect it.
+                "dalvik-main space", "dalvik-large object space",
+                "dalvik-free list large object space", "dalvik-non moving space",
+                "dalvik-zygote space",
+                nullptr};
         for (int i = 0; kNames[i] != nullptr; ++i) {
             if (memmem(line, len, kNames[i], strlen(kNames[i])) != nullptr) return true;
         }
@@ -178,45 +186,6 @@ namespace vector::native {
         return false;
     }
 
-    // DIAGNOSTIC: scan a single maps region (via direct reads of the mapped memory, since
-    // /proc/self/mem is not openable in this SELinux domain) for framework keywords.
-    static void diag_scan_region(int /*unused*/, const char* line, size_t len, size_t* budget) {
-        if (*budget == 0) return;
-        char* endp = nullptr;
-        unsigned long long start = strtoull(line, &endp, 16);
-        if (endp == line || *endp != '-') return;
-        unsigned long long end = strtoull(endp + 1, &endp, 16);
-        if (*endp != ' ' || end <= start) return;
-        const char* perms = endp + 1;
-        if (perms[0] != 'r') return;  // unreadable
-        // Only scan anonymous regions: file-backed mappings can SIGBUS if the file was truncated,
-        // and special/device mappings may fault. Anonymous RAM (ART heap/linearalloc) is safe and
-        // is where framework class metadata lives.
-        if (memchr(line, '/', len) != nullptr) return;  // has a file path -> skip
-        size_t region_size = static_cast<size_t>(end - start);
-        size_t to_read = region_size < *budget ? region_size : *budget;
-        static const char* kw[] = {"lsposed", "npatch", "riru", "zygisk", "xposed", "LSPosed", nullptr};
-        const char* base = reinterpret_cast<const char*>(start);
-        std::string tail;
-        size_t off = 0;
-        bool found = false;
-        while (off < to_read && !found) {
-            size_t n = to_read - off;
-            if (n > 65536) n = 65536;
-            std::string hay = tail;
-            hay.append(base + off, n);  // direct read of mapped memory
-            for (int i = 0; kw[i]; ++i) if (hay.find(kw[i]) != std::string::npos) { found = true; break; }
-            size_t keep = hay.size() < 16 ? hay.size() : 16;
-            tail.assign(hay.data() + hay.size() - keep, keep);
-            off += n;
-        }
-        *budget = (*budget > off) ? (*budget - off) : 0;
-        if (found) {
-            std::string l(line, len > 0 && line[len - 1] == '\n' ? len - 1 : len);
-            LOGI("SvcBypass: KEYWORD region size={} '{}'", region_size, l.c_str());
-        }
-    }
-
     static int build_filtered_proc_fd(const char* path) {
         int real_fd = openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
         if (real_fd < 0) return -1;
@@ -226,9 +195,6 @@ namespace vector::native {
         while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
         close(real_fd);
 
-        // Diagnostic keyword scan (log only) over ALL regions via direct memory reads.
-        size_t scan_budget = 200u * 1024u * 1024u;
-
         std::string out;
         out.reserve(content.size());
         size_t start = 0;
@@ -237,7 +203,6 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
-            diag_scan_region(0, line, len, &scan_budget);  // scan every region
             if (!maps_line_is_suspicious(line, len)) {
                 out.append(line, len);
             }
