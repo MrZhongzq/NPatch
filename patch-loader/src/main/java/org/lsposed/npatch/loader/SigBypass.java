@@ -216,6 +216,24 @@ public class SigBypass {
         }
     }
 
+    // Hook the PackageInfo(Parcel) constructor so signatures are spoofed for EVERY parcel
+    // unmarshal, including callers that use a saved/original CREATOR reference or construct
+    // PackageInfo directly and thus bypass our CREATOR field replacement (ported from upstream —
+    // this is the path an anti-spoofing "Creator" consistency check exploits).
+    private static void hookPackageInfoConstructor(Context context) {
+        try {
+            XposedHelpers.findAndHookConstructor(PackageInfo.class, Parcel.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    var packageInfo = (PackageInfo) param.thisObject;
+                    if (packageInfo != null) replaceSignature(context, packageInfo);
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "fail to hook PackageInfo(Parcel) constructor", t);
+        }
+    }
+
     private static void hookPackageParser(Context context, int sigBypassLevel) {
         XposedBridge.hookAllMethods(PackageParser.class, "generatePackageInfo", new XC_MethodHook() {
             @Override
@@ -367,6 +385,7 @@ public class SigBypass {
         if (sigBypassLevel >= 1) {
             hookPackageParser(context, sigBypassLevel);
             proxyPackageInfoCreator(context, sigBypassLevel);
+            hookPackageInfoConstructor(context);
         }
 
         if (sigBypassLevel >= 2 && cachedOriginalApkPath != null) {
