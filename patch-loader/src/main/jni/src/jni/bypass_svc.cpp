@@ -247,8 +247,9 @@ namespace vector::native {
         base = base ? base + 1 : diskpath;
         OverlayCtx ctx{base, &content, false};
         dl_iterate_phdr(overlay_iter_cb, &ctx);
-        if (!ctx.matched) return -1;      // not currently loaded -> let the real open proceed
-        if (content == original) return -1;  // exec segment unmodified -> nothing to hide
+        if (!ctx.matched) { LOGI("SvcBypass: overlay %s not matched in dl_iterate", base); return -1; }
+        if (content == original) { LOGI("SvcBypass: overlay %s exec unchanged", base); return -1; }
+        LOGI("SvcBypass: overlay %s exec DIFFERS -> serving", base);
 
         int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
         if (mfd < 0) return -1;
@@ -286,17 +287,23 @@ namespace vector::native {
 #endif
                     ) {
                 const char* pathname = reinterpret_cast<const char*>(req->args[1]);
+                // Diagnostic: surface how the detector reaches library disk bytes.
+                if (pathname != nullptr && (strstr(pathname, "libart") || strstr(pathname, "libc.so")
+                        || strstr(pathname, "libcheck") || strstr(pathname, "/proc/self/mem")
+                        || strstr(pathname, "map_files") || strstr(pathname, "pagemap"))) {
+                    LOGI("SvcBypass: openat probe path='%s'", pathname);
+                }
                 if (is_hideable_maps_path(pathname)) {
                     int fd = build_filtered_proc_fd(pathname);
                     if (fd >= 0) {
-                        LOGD("SvcBypass: served filtered %s (fd=%d)", pathname, fd);
+                        LOGI("SvcBypass: served filtered %s (fd=%d)", pathname, fd);
                         req->result = fd;
                         handled = true;
                     }
                 } else if (is_integrity_checked_lib(pathname)) {
                     int fd = build_lib_overlay_fd(pathname);
+                    LOGI("SvcBypass: lib overlay for %s -> fd=%d", pathname, fd);
                     if (fd >= 0) {
-                        LOGD("SvcBypass: served mem-matching %s (fd=%d)", pathname, fd);
                         req->result = fd;
                         handled = true;
                     }
