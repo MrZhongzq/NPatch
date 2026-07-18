@@ -160,15 +160,7 @@ namespace vector::native {
     static bool maps_line_is_suspicious(const char* line, size_t len) {
         static const char* kNames[] = {
                 "npatch", "lsposed", "riru", "zygisk", "magisk", "frida",
-                "/data/adb", "/data/local/tmp", "memfd:",
-                // ART Java heap object spaces: they hold the framework's class-name strings
-                // ("xposed"/"lsposed") that memory keyword scanners flag. The app reaches its
-                // own heap through object pointers, not through /proc/self/maps, so removing
-                // these lines from the maps view doesn't affect it.
-                "dalvik-main space", "dalvik-large object space",
-                "dalvik-free list large object space", "dalvik-non moving space",
-                "dalvik-zygote space",
-                nullptr};
+                "/data/adb", "/data/local/tmp", "memfd:", nullptr};
         for (int i = 0; kNames[i] != nullptr; ++i) {
             if (memmem(line, len, kNames[i], strlen(kNames[i])) != nullptr) return true;
         }
@@ -182,38 +174,6 @@ namespace vector::native {
                 // A file-backed mapping lists its path (contains '/'); anonymous ones don't.
                 if (memmem(rest, restlen, "/", 1) == nullptr) return true;
             }
-        }
-        return false;
-    }
-
-    // Scans an anonymous region's mapped bytes directly (/proc/self/mem is unavailable in this
-    // SELinux domain) for framework keywords. Only anonymous RAM is scanned — file-backed maps
-    // can SIGBUS on truncation, device maps can fault. Used to catch un-named heap regions that
-    // still carry the framework's class-name strings.
-    static bool region_content_has_keyword(const char* line, size_t len) {
-        char* endp = nullptr;
-        unsigned long long start = strtoull(line, &endp, 16);
-        if (endp == line || *endp != '-') return false;
-        unsigned long long end = strtoull(endp + 1, &endp, 16);
-        if (*endp != ' ' || end <= start) return false;
-        const char* perms = endp + 1;
-        if (perms[0] != 'r') return false;               // unreadable
-        if (memchr(line, '/', len) != nullptr) return false;  // file-backed -> skip
-        size_t size = static_cast<size_t>(end - start);
-        static const size_t kCap = 32u * 1024u * 1024u;  // cap per region
-        size_t to_read = size < kCap ? size : kCap;
-        static const char* kw[] = {"lsposed", "npatch", "riru", "zygisk", "xposed", "LSPosed", nullptr};
-        const char* base = reinterpret_cast<const char*>(start);
-        std::string tail;
-        for (size_t off = 0; off < to_read;) {
-            size_t n = to_read - off;
-            if (n > 65536) n = 65536;
-            std::string hay = tail;
-            hay.append(base + off, n);
-            for (int i = 0; kw[i]; ++i) if (hay.find(kw[i]) != std::string::npos) return true;
-            size_t keep = hay.size() < 16 ? hay.size() : 16;
-            tail.assign(hay.data() + hay.size() - keep, keep);
-            off += n;
         }
         return false;
     }
@@ -235,9 +195,7 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
-            // Drop by name/anon-exec first (short-circuits the big named heaps), then content-scan
-            // remaining anonymous regions for framework keywords.
-            if (!maps_line_is_suspicious(line, len) && !region_content_has_keyword(line, len)) {
+            if (!maps_line_is_suspicious(line, len)) {
                 out.append(line, len);
             }
             start = end;
