@@ -218,9 +218,12 @@ namespace vector::native {
         base = base ? base + 1 : name;
         if (strcmp(base, ctx->soname) != 0) return 0;
 
+        // Overlay every loadable segment's file-backed bytes with the current in-memory bytes.
+        // Detectors CRC both .text (exec) and .data.rel.ro/.got (data) disk-vs-memory; the data
+        // segment also legitimately differs after relocation, so we must mirror it too.
         for (int i = 0; i < info->dlpi_phnum; ++i) {
             const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
-            if (ph->p_type != PT_LOAD || !(ph->p_flags & PF_X)) continue;
+            if (ph->p_type != PT_LOAD) continue;
             uintptr_t mem_start = info->dlpi_addr + ph->p_vaddr;
             size_t off = static_cast<size_t>(ph->p_offset);
             size_t sz = static_cast<size_t>(ph->p_filesz);
@@ -247,9 +250,9 @@ namespace vector::native {
         base = base ? base + 1 : diskpath;
         OverlayCtx ctx{base, &content, false};
         dl_iterate_phdr(overlay_iter_cb, &ctx);
-        if (!ctx.matched) { LOGI("SvcBypass: overlay %s not matched in dl_iterate", base); return -1; }
-        if (content == original) { LOGI("SvcBypass: overlay %s exec unchanged", base); return -1; }
-        LOGI("SvcBypass: overlay %s exec DIFFERS -> serving", base);
+        if (!ctx.matched) { LOGI("SvcBypass: overlay '{}' not matched in dl_iterate", base); return -1; }
+        if (content == original) { LOGI("SvcBypass: overlay '{}' segments unchanged", base); return -1; }
+        LOGI("SvcBypass: overlay '{}' segments DIFFER -> serving", base);
 
         int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
         if (mfd < 0) return -1;
@@ -287,22 +290,20 @@ namespace vector::native {
 #endif
                     ) {
                 const char* pathname = reinterpret_cast<const char*>(req->args[1]);
-                // Diagnostic: surface how the detector reaches library disk bytes.
                 if (pathname != nullptr && (strstr(pathname, "libart") || strstr(pathname, "libc.so")
                         || strstr(pathname, "libcheck") || strstr(pathname, "/proc/self/mem")
                         || strstr(pathname, "map_files") || strstr(pathname, "pagemap"))) {
-                    LOGI("SvcBypass: openat probe path='%s'", pathname);
+                    LOGI("SvcBypass: openat probe path='{}'", pathname);
                 }
                 if (is_hideable_maps_path(pathname)) {
                     int fd = build_filtered_proc_fd(pathname);
                     if (fd >= 0) {
-                        LOGI("SvcBypass: served filtered %s (fd=%d)", pathname, fd);
                         req->result = fd;
                         handled = true;
                     }
                 } else if (is_integrity_checked_lib(pathname)) {
                     int fd = build_lib_overlay_fd(pathname);
-                    LOGI("SvcBypass: lib overlay for %s -> fd=%d", pathname, fd);
+                    LOGI("SvcBypass: lib overlay for '{}' -> fd={}", pathname, fd);
                     if (fd >= 0) {
                         req->result = fd;
                         handled = true;
