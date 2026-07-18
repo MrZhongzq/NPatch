@@ -381,10 +381,14 @@ public class SigBypass {
                     : extractOriginalApk(context);
         }
 
-        // Java PMS Hook
+        // Java PMS Hook. We DON'T replace PackageInfo.CREATOR: anti-spoofing checks flag a
+        // replaced CREATOR by class name ("android.content.pm.PackageInfo$1") and by field count
+        // (the original has none, a proxy has captured fields). Instead we hook the
+        // PackageInfo(Parcel) constructor, which the original CREATOR.createFromParcel calls for
+        // every IPC unmarshal — so signatures are spoofed on that same path while CREATOR stays
+        // the genuine system object.
         if (sigBypassLevel >= 1) {
             hookPackageParser(context, sigBypassLevel);
-            proxyPackageInfoCreator(context, sigBypassLevel);
             hookPackageInfoConstructor(context);
         }
 
