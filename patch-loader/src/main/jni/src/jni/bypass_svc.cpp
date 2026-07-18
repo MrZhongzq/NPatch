@@ -186,6 +186,38 @@ namespace vector::native {
         return false;
     }
 
+    // Scans an anonymous region's mapped bytes directly (/proc/self/mem is unavailable in this
+    // SELinux domain) for framework keywords. Only anonymous RAM is scanned — file-backed maps
+    // can SIGBUS on truncation, device maps can fault. Used to catch un-named heap regions that
+    // still carry the framework's class-name strings.
+    static bool region_content_has_keyword(const char* line, size_t len) {
+        char* endp = nullptr;
+        unsigned long long start = strtoull(line, &endp, 16);
+        if (endp == line || *endp != '-') return false;
+        unsigned long long end = strtoull(endp + 1, &endp, 16);
+        if (*endp != ' ' || end <= start) return false;
+        const char* perms = endp + 1;
+        if (perms[0] != 'r') return false;               // unreadable
+        if (memchr(line, '/', len) != nullptr) return false;  // file-backed -> skip
+        size_t size = static_cast<size_t>(end - start);
+        static const size_t kCap = 32u * 1024u * 1024u;  // cap per region
+        size_t to_read = size < kCap ? size : kCap;
+        static const char* kw[] = {"lsposed", "npatch", "riru", "zygisk", "xposed", "LSPosed", nullptr};
+        const char* base = reinterpret_cast<const char*>(start);
+        std::string tail;
+        for (size_t off = 0; off < to_read;) {
+            size_t n = to_read - off;
+            if (n > 65536) n = 65536;
+            std::string hay = tail;
+            hay.append(base + off, n);
+            for (int i = 0; kw[i]; ++i) if (hay.find(kw[i]) != std::string::npos) return true;
+            size_t keep = hay.size() < 16 ? hay.size() : 16;
+            tail.assign(hay.data() + hay.size() - keep, keep);
+            off += n;
+        }
+        return false;
+    }
+
     static int build_filtered_proc_fd(const char* path) {
         int real_fd = openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
         if (real_fd < 0) return -1;
@@ -203,7 +235,9 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
-            if (!maps_line_is_suspicious(line, len)) {
+            // Drop by name/anon-exec first (short-circuits the big named heaps), then content-scan
+            // remaining anonymous regions for framework keywords.
+            if (!maps_line_is_suspicious(line, len) && !region_content_has_keyword(line, len)) {
                 out.append(line, len);
             }
             start = end;
