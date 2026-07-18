@@ -79,35 +79,11 @@ namespace vector::native {
         return openat(dirfd, path, flags, mode);
     }
 
-    // PLT hooking only rewrites GOTs of libraries already loaded at refresh time. The app's
-    // own native libs (e.g. the one doing signature checks) are dlopen'd later, so we hook the
-    // dlopen family and re-refresh after each load to keep newly-mapped libs covered.
-    using DlopenExtFn = void *(*)(const char *, int, const void *);
-    using DlopenFn = void *(*)(const char *, int);
-    static DlopenExtFn real_android_dlopen_ext = nullptr;
-    static DlopenFn real_dlopen = nullptr;
-
-    static void refreshHooks();
-
-    static void *hooked_android_dlopen_ext(const char *name, int flags, const void *extinfo) {
-        void *handle = real_android_dlopen_ext != nullptr
-                       ? real_android_dlopen_ext(name, flags, extinfo)
-                       : android_dlopen_ext(name, flags, static_cast<const android_dlextinfo *>(extinfo));
-        if (handle != nullptr) refreshHooks();
-        return handle;
-    }
-
-    static void *hooked_dlopen(const char *name, int flags) {
-        void *handle = real_dlopen != nullptr ? real_dlopen(name, flags) : dlopen(name, flags);
-        if (handle != nullptr) refreshHooks();
-        return handle;
-    }
-
     static bool hooksRegistered = false;
 
-    static void refreshHooks() {
+    static void installOpenatHooks() {
         // xHook wants registrations set up once; xhook_refresh then (re)applies them to every
-        // currently-mapped library. We re-refresh after each dlopen to cover new libs.
+        // currently-mapped library.
         if (!hooksRegistered) {
             // Don't hook our own library or the dynamic linker.
             xhook_ignore(".*/libnpatch\\.so$", nullptr);
@@ -117,17 +93,10 @@ namespace vector::native {
                            reinterpret_cast<void **>(&real_openat));
             xhook_register(".*\\.so$", "openat64", reinterpret_cast<void *>(hooked_openat64),
                            reinterpret_cast<void **>(&real_openat64));
-            xhook_register(".*\\.so$", "android_dlopen_ext",
-                           reinterpret_cast<void *>(hooked_android_dlopen_ext),
-                           reinterpret_cast<void **>(&real_android_dlopen_ext));
-            xhook_register(".*\\.so$", "dlopen", reinterpret_cast<void *>(hooked_dlopen),
-                           reinterpret_cast<void **>(&real_dlopen));
             hooksRegistered = true;
         }
         xhook_refresh(0);
     }
-
-    static void installOpenatHooks() { refreshHooks(); }
 
     LSP_DEF_NATIVE_METHOD(void, SigBypass, enableOpenatHook,
                           jstring jOrigApkPath,
