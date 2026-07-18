@@ -118,9 +118,74 @@ namespace vector::native {
         return g_redirect_buffer.c_str();
     }
 
-    // Trusted thread: it is NOT subject to the SIGSYS trap (it never triggers the filter for
-    // these syscalls because it performs them on behalf of the faulting thread), so it can
-    // rewrite the path and execute the real syscall, returning the genuine kernel result.
+    // ---- /proc/self/maps|smaps filtering (anti-detection) ------------------------------------
+    // Detectors scan /proc/self/maps for injection traces. We serve a filtered copy: drop lines
+    // whose pathname names our tooling, and drop anonymous executable mappings (hook trampolines
+    // / in-memory dex). Runs on the trusted thread, which is created before the seccomp filter is
+    // installed and is therefore not itself trapped, so it can freely read the real file.
+
+    static bool is_hideable_maps_path(const char* p) {
+        if (p == nullptr) return false;
+        return strcmp(p, "/proc/self/maps") == 0 || strcmp(p, "/proc/self/smaps") == 0;
+    }
+
+    static bool maps_line_is_suspicious(const char* line, size_t len) {
+        static const char* kNames[] = {
+                "npatch", "lsposed", "riru", "zygisk", "magisk", "frida",
+                "/data/adb", "/data/local/tmp", "memfd:", nullptr};
+        for (int i = 0; kNames[i] != nullptr; ++i) {
+            if (memmem(line, len, kNames[i], strlen(kNames[i])) != nullptr) return true;
+        }
+        // Parse "addr perms ..."; drop anonymous executable regions (exec perm + no file path).
+        const char* sp = static_cast<const char*>(memchr(line, ' ', len));
+        if (sp != nullptr && static_cast<size_t>(sp - line) + 5 < len) {
+            const char* perms = sp + 1;             // e.g. "r-xp"
+            if (perms[2] == 'x') {
+                const char* rest = perms + 4;
+                size_t restlen = len - static_cast<size_t>(rest - line);
+                // A file-backed mapping lists its path (contains '/'); anonymous ones don't.
+                if (memmem(rest, restlen, "/", 1) == nullptr) return true;
+            }
+        }
+        return false;
+    }
+
+    static int build_filtered_proc_fd(const char* path) {
+        int real_fd = openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
+        if (real_fd < 0) return -1;
+        std::string content;
+        char buf[8192];
+        ssize_t r;
+        while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
+        close(real_fd);
+
+        std::string out;
+        out.reserve(content.size());
+        size_t start = 0;
+        while (start < content.size()) {
+            size_t nl = content.find('\n', start);
+            size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
+            const char* line = content.data() + start;
+            size_t len = end - start;
+            if (!maps_line_is_suspicious(line, len)) out.append(line, len);
+            start = end;
+        }
+
+        int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
+        if (mfd < 0) return -1;
+        size_t written = 0;
+        while (written < out.size()) {
+            ssize_t w = write(mfd, out.data() + written, out.size() - written);
+            if (w <= 0) { close(mfd); return -1; }
+            written += static_cast<size_t>(w);
+        }
+        lseek(mfd, 0, SEEK_SET);
+        return mfd;
+    }
+
+    // Trusted thread: it is NOT subject to the SIGSYS trap (it is created before the filter is
+    // installed), so it can rewrite the path and execute the real syscall, returning the genuine
+    // kernel result.
     static void* trusted_thread_loop(void*) {
         LOGD("SvcBypass: trusted thread started (tid=%d)", gettid());
         while (true) {
@@ -133,7 +198,26 @@ namespace vector::native {
                 continue;
             }
 
-            if (is_redirected_syscall(req->sys_no)) {
+            bool handled = false;
+
+            // Intercept openat("/proc/self/maps"|smaps) and hand back a filtered snapshot.
+            if (req->sys_no == __NR_openat
+#ifdef __NR_openat2
+                || req->sys_no == __NR_openat2
+#endif
+                    ) {
+                const char* pathname = reinterpret_cast<const char*>(req->args[1]);
+                if (is_hideable_maps_path(pathname)) {
+                    int fd = build_filtered_proc_fd(pathname);
+                    if (fd >= 0) {
+                        LOGD("SvcBypass: served filtered %s (fd=%d)", pathname, fd);
+                        req->result = fd;
+                        handled = true;
+                    }
+                }
+            }
+
+            if (!handled && is_redirected_syscall(req->sys_no)) {
                 const char* pathname = reinterpret_cast<const char*>(req->args[1]);
                 const char* redirected_path = resolve_redirect_path(pathname);
                 if (redirected_path != pathname && redirected_path != nullptr) {
@@ -142,8 +226,10 @@ namespace vector::native {
                 }
             }
 
-            req->result = syscall(req->sys_no, req->args[0], req->args[1], req->args[2],
-                                  req->args[3], req->args[4], req->args[5]);
+            if (!handled) {
+                req->result = syscall(req->sys_no, req->args[0], req->args[1], req->args[2],
+                                      req->args[3], req->args[4], req->args[5]);
+            }
 
             // Anti-detection: an app that inspects /proc/self/fd/<n> for its own loaded dex/apk
             // sees our cached origin apk path (".../cache/npatch/origin/<crc>.apk"), which betrays
