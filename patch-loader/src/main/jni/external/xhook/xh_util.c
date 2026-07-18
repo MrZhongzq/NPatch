@@ -33,9 +33,20 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 #include "xh_util.h"
 #include "xh_errno.h"
 #include "xh_log.h"
+
+// NDK 27+ removed the compile-time PAGE_SIZE/PAGE_MASK macros (16KB page support means the
+// page size is only known at runtime). Fall back to the runtime page size so mprotect
+// rounding stays correct on both 4KB and 16KB devices.
+#ifndef PAGE_SIZE
+#define PAGE_SIZE ((uintptr_t)getpagesize())
+#endif
+#ifndef PAGE_MASK
+#define PAGE_MASK (~(PAGE_SIZE - 1))
+#endif
 
 #define PAGE_START(addr) ((addr) & PAGE_MASK)
 #define PAGE_END(addr)   (PAGE_START(addr + sizeof(uintptr_t) - 1) + PAGE_SIZE)
