@@ -499,8 +499,18 @@ public class NPatch {
              ZipOutputStream zos = new ZipOutputStream(counter)) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
+            java.util.Set<String> written = new java.util.HashSet<>();
             while ((entry = zis.getNextEntry()) != null) {
-                ZipEntry outEntry = new ZipEntry(entry.getName());
+                // Recent AGP/zipalign insert empty-named STORED padding pseudo-entries (16KB
+                // page alignment). They appear in the local-header stream but not as real files;
+                // copying them verbatim collides on the empty name. Skip them (and any duplicate);
+                // our own alignStoredEntry re-establishes native-lib alignment below.
+                String name = entry.getName();
+                if (name.isEmpty() || !written.add(name)) {
+                    zis.closeEntry();
+                    continue;
+                }
+                ZipEntry outEntry = new ZipEntry(name);
                 outEntry.setMethod(entry.getMethod());
                 if (entry.getMethod() == ZipEntry.STORED) {
                     outEntry.setSize(entry.getSize());

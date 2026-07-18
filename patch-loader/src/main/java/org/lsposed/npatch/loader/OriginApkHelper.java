@@ -135,8 +135,16 @@ public class OriginApkHelper {
              ZipOutputStream zos = new ZipOutputStream(counter)) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
+            java.util.Set<String> written = new java.util.HashSet<>();
             while ((entry = zis.getNextEntry()) != null) {
-                ZipEntry outEntry = new ZipEntry(entry.getName());
+                // Skip empty-named padding pseudo-entries (16KB alignment) and duplicates; they
+                // would collide in ZipOutputStream (see NPatch.buildProviderReadyOriginApk).
+                String name = entry.getName();
+                if (name.isEmpty() || !written.add(name)) {
+                    zis.closeEntry();
+                    continue;
+                }
+                ZipEntry outEntry = new ZipEntry(name);
                 outEntry.setMethod(entry.getMethod());
                 if (entry.getMethod() == ZipEntry.STORED) {
                     outEntry.setSize(entry.getSize());
