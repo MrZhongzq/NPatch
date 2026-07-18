@@ -242,11 +242,13 @@ namespace vector::native {
         close(real_fd);
         if (content.empty()) return -1;
 
+        std::string original = content;  // to detect whether any exec byte actually differs
         const char* base = strrchr(diskpath, '/');
         base = base ? base + 1 : diskpath;
         OverlayCtx ctx{base, &content, false};
         dl_iterate_phdr(overlay_iter_cb, &ctx);
-        if (!ctx.matched) return -1;  // not currently loaded -> let the real open proceed
+        if (!ctx.matched) return -1;      // not currently loaded -> let the real open proceed
+        if (content == original) return -1;  // exec segment unmodified -> nothing to hide
 
         int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
         if (mfd < 0) return -1;

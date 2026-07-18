@@ -372,12 +372,17 @@ public class SigBypass {
         if (sigBypassLevel >= 2 && cachedOriginalApkPath != null) {
             // 1. Java Core IO stability
             hookJavaIO(currentApkPath, cachedOriginalApkPath);
-            // 2. Native OpenAt Hook
-            org.lsposed.lspd.nativebridge.SigBypass.enableOpenatHook(
-                    currentApkPath,
-                    cachedOriginalApkPath,
-                    context.getPackageName()
-            );
+            // 2. Native OpenAt Hook (lv2/lv3 only). xHook rewrites each library's GOT (in the
+            //    .data.rel.ro segment), which native integrity detectors flag as a hooked data
+            //    segment ("lib has been hooked"). At lv4 the seccomp filter redirects openat at
+            //    the syscall level without touching any GOT/code, so we skip xHook there.
+            if (sigBypassLevel < 4) {
+                org.lsposed.lspd.nativebridge.SigBypass.enableOpenatHook(
+                        currentApkPath,
+                        cachedOriginalApkPath,
+                        context.getPackageName()
+                );
+            }
 
             // Signature spoofing (replaces the old lv3 path redirection). Instead of pointing
             // the app's own sourceDir/context at origin.apk (which broke WebView/classloader
