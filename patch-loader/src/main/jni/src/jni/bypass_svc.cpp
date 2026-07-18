@@ -144,6 +144,30 @@ namespace vector::native {
 
             req->result = syscall(req->sys_no, req->args[0], req->args[1], req->args[2],
                                   req->args[3], req->args[4], req->args[5]);
+
+            // Anti-detection: an app that inspects /proc/self/fd/<n> for its own loaded dex/apk
+            // sees our cached origin apk path (".../cache/npatch/origin/<crc>.apk"), which betrays
+            // the patch. Rewrite such readlinkat results back to the real installed apk path so
+            // the fd looks normal.
+#ifdef __NR_readlinkat
+            if (req->sys_no == __NR_readlinkat && req->result > 0) {
+                char* outbuf = reinterpret_cast<char*>(req->args[2]);
+                size_t bufsiz = static_cast<size_t>(req->args[3]);
+                size_t n = static_cast<size_t>(req->result);
+                if (outbuf != nullptr && n <= bufsiz) {
+                    std::scoped_lock lock(g_path_mutex);
+                    if (g_target_path[0] != '\0'
+                            && memmem(outbuf, n, "/npatch/origin/", 15) != nullptr) {
+                        size_t tlen = strlen(g_target_path);
+                        if (tlen > 0 && tlen <= bufsiz) {
+                            memcpy(outbuf, g_target_path, tlen);
+                            req->result = static_cast<long>(tlen);
+                        }
+                    }
+                }
+            }
+#endif
+
             if (req->result == -1) {
                 req->result = -errno;
             }
