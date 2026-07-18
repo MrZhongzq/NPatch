@@ -131,7 +131,8 @@ public class OriginApkHelper {
         String nextDexName = findNextDexName(targetApk);
 
         try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(targetApk));
-             ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(tempApk, StandardOpenOption.TRUNCATE_EXISTING))) {
+             CountingOutputStream counter = new CountingOutputStream(Files.newOutputStream(tempApk, StandardOpenOption.TRUNCATE_EXISTING));
+             ZipOutputStream zos = new ZipOutputStream(counter)) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
             while ((entry = zis.getNextEntry()) != null) {
@@ -141,6 +142,11 @@ public class OriginApkHelper {
                     outEntry.setSize(entry.getSize());
                     outEntry.setCompressedSize(entry.getCompressedSize());
                     outEntry.setCrc(entry.getCrc());
+                    // Page-align uncompressed native libs so the linker can mmap them in place
+                    // when this origin apk is loaded standalone (see NPatch.alignStoredEntry).
+                    if (isUncompressedNativeLib(outEntry)) {
+                        alignStoredEntry(outEntry, counter.getCount());
+                    }
                 }
                 outEntry.setTime(entry.getTime());
                 zos.putNextEntry(outEntry);
@@ -159,6 +165,50 @@ public class OriginApkHelper {
         }
 
         Files.move(tempApk, targetApk, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    // Page size for aligning uncompressed native libs (matches NPatch.LIB_PAGE_ALIGNMENT).
+    private static final int LIB_PAGE_ALIGNMENT = 4096;
+
+    private static boolean isUncompressedNativeLib(ZipEntry entry) {
+        String name = entry.getName();
+        return entry.getMethod() == ZipEntry.STORED && name.startsWith("lib/") && name.endsWith(".so");
+    }
+
+    private static void alignStoredEntry(ZipEntry entry, long localHeaderOffset) {
+        int nameLen = entry.getName().getBytes(StandardCharsets.UTF_8).length;
+        byte[] existing = entry.getExtra();
+        int extraLen = existing == null ? 0 : existing.length;
+        long dataStart = localHeaderOffset + 30L + nameLen + extraLen; // 30 = local file header size
+        int padding = (int) ((LIB_PAGE_ALIGNMENT - (dataStart % LIB_PAGE_ALIGNMENT)) % LIB_PAGE_ALIGNMENT);
+        if (padding == 0) return;
+        byte[] newExtra = new byte[extraLen + padding];
+        if (existing != null) System.arraycopy(existing, 0, newExtra, 0, extraLen);
+        entry.setExtra(newExtra);
+    }
+
+    private static final class CountingOutputStream extends java.io.FilterOutputStream {
+        private long count = 0;
+
+        CountingOutputStream(java.io.OutputStream out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            count++;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            count += len;
+        }
+
+        long getCount() {
+            return count;
+        }
     }
 
     private static String findNextDexName(Path targetApk) throws IOException {

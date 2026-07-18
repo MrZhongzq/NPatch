@@ -495,7 +495,8 @@ public class NPatch {
         String nextDexName = findNextDexName(srcApkFile);
 
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(srcApkFile));
-             ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(tempApk))) {
+             CountingOutputStream counter = new CountingOutputStream(new FileOutputStream(tempApk));
+             ZipOutputStream zos = new ZipOutputStream(counter)) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
             while ((entry = zis.getNextEntry()) != null) {
@@ -505,6 +506,13 @@ public class NPatch {
                     outEntry.setSize(entry.getSize());
                     outEntry.setCompressedSize(entry.getCompressedSize());
                     outEntry.setCrc(entry.getCrc());
+                    // Page-align uncompressed native libraries. This repackaged origin apk is
+                    // later extracted standalone and its libs are mmap'd in place by the linker
+                    // (the app's sourceDir points here); without alignment System.loadLibrary
+                    // fails with UnsatisfiedLinkError "library ... not found".
+                    if (isUncompressedNativeLib(outEntry)) {
+                        alignStoredEntry(outEntry, counter.getCount());
+                    }
                 }
                 outEntry.setTime(entry.getTime());
                 zos.putNextEntry(outEntry);
@@ -523,6 +531,56 @@ public class NPatch {
         }
 
         return tempApk;
+    }
+
+    // Page size used to align uncompressed native libraries inside the origin apk so the
+    // dynamic linker can mmap them in place (same intent as `zipalign -p`). 4096 matches
+    // current arm64 devices; also satisfied for smaller page sizes.
+    private static final int LIB_PAGE_ALIGNMENT = 4096;
+
+    private static boolean isUncompressedNativeLib(ZipEntry entry) {
+        String name = entry.getName();
+        return entry.getMethod() == ZipEntry.STORED && name.startsWith("lib/") && name.endsWith(".so");
+    }
+
+    // Pad the entry's extra field so its data payload starts on a page boundary.
+    // localHeaderOffset is the byte offset where the local file header will be written.
+    private static void alignStoredEntry(ZipEntry entry, long localHeaderOffset) {
+        int nameLen = entry.getName().getBytes(StandardCharsets.UTF_8).length;
+        byte[] existing = entry.getExtra();
+        int extraLen = existing == null ? 0 : existing.length;
+        long dataStart = localHeaderOffset + 30L + nameLen + extraLen; // 30 = local file header size
+        int padding = (int) ((LIB_PAGE_ALIGNMENT - (dataStart % LIB_PAGE_ALIGNMENT)) % LIB_PAGE_ALIGNMENT);
+        if (padding == 0) return;
+        byte[] newExtra = new byte[extraLen + padding];
+        if (existing != null) System.arraycopy(existing, 0, newExtra, 0, extraLen);
+        entry.setExtra(newExtra);
+    }
+
+    // Tracks how many bytes have been written so alignStoredEntry knows each local
+    // header's offset while streaming through ZipOutputStream.
+    private static final class CountingOutputStream extends java.io.FilterOutputStream {
+        private long count = 0;
+
+        CountingOutputStream(java.io.OutputStream out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            count++;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            count += len;
+        }
+
+        long getCount() {
+            return count;
+        }
     }
 
     private String findNextDexName(File apkFile) throws IOException {
