@@ -24,6 +24,7 @@
 #include "patch_loader.h"
 
 #include "art/runtime/jit/profile_saver.h"
+#include "hide_libs.h"
 #include "art/runtime/oat_file_manager.h"
 #include "elf/elf_image.h"
 #include "jni/bypass_sig.h"
@@ -87,6 +88,7 @@ namespace vector::native {
         handler = initInfo;
         art::ProfileSaver::DisableInline(initInfo);
         art::FileManager::DisableBackgroundVerification(initInfo);
+        vector::HideLibs::Install(initInfo);
     }
 
     void PatchLoader::InitHooks(JNIEnv* env) {
