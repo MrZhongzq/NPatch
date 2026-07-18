@@ -17,6 +17,7 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <setjmp.h>
 
 #include <link.h>
 #include <elf.h>
@@ -178,6 +179,85 @@ namespace vector::native {
         return false;
     }
 
+    // ---- fault-tolerant memory scan (like the upstream sigsetjmp/siglongjmp approach) ----------
+    // /proc/self/mem is not openable in this SELinux domain, so we read mapped memory directly.
+    // Some regions marked readable still fault (userfaultfd, racing GC/unmap), so we guard reads
+    // with a SIGSEGV/SIGBUS handler that longjmps back and lets us skip the offending region.
+    static pid_t g_scan_tid = 0;
+    static struct sigaction g_old_segv;
+    static struct sigaction g_old_bus;
+    static bool g_scan_handlers_installed = false;
+    static thread_local sigjmp_buf g_scan_jmp;
+    static thread_local volatile sig_atomic_t g_scan_active = 0;
+
+    static void scan_fault_handler(int sig, siginfo_t* info, void* ctx) {
+        if (g_scan_active && gettid() == g_scan_tid) {
+            siglongjmp(g_scan_jmp, 1);
+        }
+        // Not our scan: delegate to the previously-installed handler.
+        struct sigaction* old = (sig == SIGBUS) ? &g_old_bus : &g_old_segv;
+        if (old->sa_flags & SA_SIGINFO) {
+            if (old->sa_sigaction) old->sa_sigaction(sig, info, ctx);
+        } else if (old->sa_handler == SIG_DFL || old->sa_handler == SIG_IGN) {
+            signal(sig, SIG_DFL);  // restore default; returning re-triggers the fault -> crash
+        } else if (old->sa_handler) {
+            old->sa_handler(sig);
+        }
+    }
+
+    static void ensure_scan_handlers() {
+        if (g_scan_handlers_installed) return;
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_sigaction = scan_fault_handler;
+        sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGSEGV, &sa, &g_old_segv);
+        sigaction(SIGBUS, &sa, &g_old_bus);
+        g_scan_handlers_installed = true;
+    }
+
+    // Reads a mapped region's bytes for framework keywords, fault-tolerantly. Returns true only
+    // when a keyword was actually seen (a faulting/unreadable region returns false = keep it).
+    static bool region_content_has_keyword(const char* line, size_t len, size_t* budget) {
+        if (*budget == 0) return false;
+        char* endp = nullptr;
+        unsigned long long start = strtoull(line, &endp, 16);
+        if (endp == line || *endp != '-') return false;
+        unsigned long long end = strtoull(endp + 1, &endp, 16);
+        if (*endp != ' ' || end <= start) return false;
+        const char* perms = endp + 1;
+        if (perms[0] != 'r') return false;  // unreadable
+        // Only anonymous RAM (where framework class-name strings live). File/device mappings are
+        // skipped: reads there can block or have side effects beyond faults.
+        if (memchr(line, '/', len) != nullptr) return false;
+        size_t size = static_cast<size_t>(end - start);
+        static const size_t kCap = 24u * 1024u * 1024u;  // per-region cap
+        size_t to_read = size < kCap ? size : kCap;
+        if (to_read > *budget) to_read = *budget;
+        static const char* kw[] = {"lsposed", "npatch", "riru", "zygisk", "xposed", "LSPosed", nullptr};
+        const char* base = reinterpret_cast<const char*>(start);
+        bool found = false;
+        char page[4096];
+        std::string tail;
+        g_scan_active = 1;
+        if (sigsetjmp(g_scan_jmp, 1) == 0) {
+            for (size_t off = 0; off < to_read && !found; off += sizeof(page)) {
+                size_t n = to_read - off;
+                if (n > sizeof(page)) n = sizeof(page);
+                memcpy(page, base + off, n);  // may fault -> siglongjmp back below
+                std::string hay = tail;
+                hay.append(page, n);
+                for (int i = 0; kw[i]; ++i) if (hay.find(kw[i]) != std::string::npos) { found = true; break; }
+                size_t keep = hay.size() < 16 ? hay.size() : 16;
+                tail.assign(hay.data() + hay.size() - keep, keep);
+            }
+        }
+        g_scan_active = 0;
+        *budget = (*budget > to_read) ? (*budget - to_read) : 0;
+        return found;
+    }
+
     static int build_filtered_proc_fd(const char* path) {
         int real_fd = openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
         if (real_fd < 0) return -1;
@@ -187,6 +267,9 @@ namespace vector::native {
         while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
         close(real_fd);
 
+        // Total per-call byte budget for the (fault-tolerant) content scan, to bound cost/ANR.
+        size_t scan_budget = 160u * 1024u * 1024u;
+
         std::string out;
         out.reserve(content.size());
         size_t start = 0;
@@ -195,7 +278,10 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
-            if (!maps_line_is_suspicious(line, len)) {
+            // Drop injection-trace names / anon-exec, and any region whose bytes carry a framework
+            // class-name keyword (heap regions holding "xposed"/"lsposed" strings).
+            if (!maps_line_is_suspicious(line, len)
+                    && !region_content_has_keyword(line, len, &scan_budget)) {
                 out.append(line, len);
             }
             start = end;
@@ -303,6 +389,8 @@ namespace vector::native {
     // kernel result.
     static void* trusted_thread_loop(void*) {
         LOGD("SvcBypass: trusted thread started (tid=%d)", gettid());
+        g_scan_tid = gettid();
+        ensure_scan_handlers();
         while (true) {
             SeccompRequest* req = nullptr;
             ssize_t bytes_read = read(g_req_pipe[0], &req, sizeof(req));
