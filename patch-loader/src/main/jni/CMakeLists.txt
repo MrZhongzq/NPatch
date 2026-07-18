@@ -10,6 +10,21 @@ endif()
 
 add_subdirectory(${CORE_ROOT} native)
 
+# xHook (PLT/GOT hooking) — used by bypass_sig to redirect openat without inline-patching
+# libc's executable segment (which native anti-tamper detectors flag). Third-party C code,
+# built with warnings disabled.
+set(XHOOK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/xhook)
+add_library(xhook STATIC
+        ${XHOOK_DIR}/xh_core.c
+        ${XHOOK_DIR}/xh_elf.c
+        ${XHOOK_DIR}/xh_util.c
+        ${XHOOK_DIR}/xh_log.c
+        ${XHOOK_DIR}/xh_version.c
+        ${XHOOK_DIR}/xhook.c)
+target_include_directories(xhook PUBLIC ${XHOOK_DIR})
+target_compile_options(xhook PRIVATE -std=c11 -w -O2 -fvisibility=hidden)
+target_link_libraries(xhook log)
+
 aux_source_directory(src SRC_LIST)
 aux_source_directory(src/jni SRC_LIST)
 set(SRC_LIST ${SRC_LIST} api/patch_main.cpp)
@@ -19,9 +34,9 @@ set(SRC_LIST ${SRC_LIST} src/jni/bypass_svc.cpp)
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 
 target_include_directories(${PROJECT_NAME} PUBLIC include)
-target_include_directories(${PROJECT_NAME} PRIVATE src)
+target_include_directories(${PROJECT_NAME} PRIVATE src ${XHOOK_DIR})
 
-target_link_libraries(${PROJECT_NAME} native log)
+target_link_libraries(${PROJECT_NAME} native log xhook)
 
 if (DEFINED DEBUG_SYMBOLS_PATH)
     set(DEBUG_SYMBOLS_PATH ${DEBUG_SYMBOLS_PATH}/${API})

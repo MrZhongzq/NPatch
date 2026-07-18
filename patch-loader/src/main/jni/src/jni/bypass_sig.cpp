@@ -1,60 +1,138 @@
 //
-// Created by VIP on 2021/4/25.
-// Modified  by HSSkyBoy on 2025/12/15
+// Signature-bypass apk read redirection.
+//
+// Reworked to hook openat via xHook (PLT/GOT) instead of a Dobby inline hook.
+// Inline-hooking libc's openat rewrites libc's executable segment, which native
+// anti-tamper detectors flag ("libc.so executable segment hooked" via disk-vs-memory
+// CRC). PLT hooking only rewrites each caller library's GOT (a data segment that the
+// linker already relocates at load), so libc's code stays byte-identical on disk and
+// in memory.
 //
 
 #include "bypass_sig.h"
 
-#include "core/native_api.h"
-#include "elf/elf_image.h"
 #include "common/logging.h"
 #include "npatch_compat.h"
-#include "patch_loader.h"
-#include "utils/hook_helper.hpp"
 #include "utils/jni_helper.hpp"
-#include <unistd.h>
-#include <string>
-#include <cstring>
-#include <memory>
 
-using lsplant::operator""_sym;
+#include "xhook.h"
+
+#include <fcntl.h>
+#include <dlfcn.h>
+#include <android/dlext.h>
+#include <cstdarg>
+#include <cstring>
+#include <string>
+#include <sys/types.h>
 
 namespace vector::native {
 
+    // The app's own apk path (base.apk); reads of it are redirected to origin.apk so
+    // signature/integrity checks see the original, unpatched contents.
     static std::string targetApkPath;
     static std::string redirectApkPath;
     static std::string currentPackageName;
-    static void *openat_backup = nullptr;
 
-    inline static constexpr const char* kLibCName = "libc.so";
+    using OpenAtFn = int (*)(int, const char *, int, ...);
+    static OpenAtFn real_openat = nullptr;
+    static OpenAtFn real_openat64 = nullptr;
 
-    // 修改回傳型別以匹配 kImg 的實際型別
-    std::unique_ptr<vector::native::ElfImage> &GetC(bool release = false) {
-        static auto kImg = std::make_unique<vector::native::ElfImage>(kLibCName);
-        if (release) {
-            kImg.reset();
-            kImg = nullptr;
-        }
-        return kImg;
+    static bool needs_mode(int flags) {
+        return (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
     }
 
-    // OpenAt Hook 邏輯
-    inline static auto __openat_ =
-            "__openat"_sym.hook->*[]<lsplant::Backup auto backup>(int fd, const char *pathname, int flag,
-                                                                  int mode) static -> int {
-                if (pathname && !targetApkPath.empty() && strcmp(pathname, targetApkPath.c_str()) == 0) {
-                    return backup(fd, redirectApkPath.c_str(), flag, mode);
-                }
-                return backup(fd, pathname, flag, mode);
-            };
+    static const char *resolve_redirect(const char *pathname) {
+        if (pathname != nullptr && !targetApkPath.empty()
+            && strcmp(pathname, targetApkPath.c_str()) == 0) {
+            return redirectApkPath.c_str();
+        }
+        return pathname;
+    }
 
-    static bool HookOpenat(const lsplant::HookHandler &handler) { return handler(__openat_); }
+    static int hooked_openat(int dirfd, const char *pathname, int flags, ...) {
+        mode_t mode = 0;
+        if (needs_mode(flags)) {
+            va_list ap;
+            va_start(ap, flags);
+            mode = static_cast<mode_t>(va_arg(ap, int));
+            va_end(ap);
+        }
+        const char *path = resolve_redirect(pathname);
+        if (real_openat != nullptr) {
+            return real_openat(dirfd, path, flags, mode);
+        }
+        return openat(dirfd, path, flags, mode);
+    }
+
+    static int hooked_openat64(int dirfd, const char *pathname, int flags, ...) {
+        mode_t mode = 0;
+        if (needs_mode(flags)) {
+            va_list ap;
+            va_start(ap, flags);
+            mode = static_cast<mode_t>(va_arg(ap, int));
+            va_end(ap);
+        }
+        const char *path = resolve_redirect(pathname);
+        if (real_openat64 != nullptr) {
+            return real_openat64(dirfd, path, flags, mode);
+        }
+        return openat(dirfd, path, flags, mode);
+    }
+
+    // PLT hooking only rewrites GOTs of libraries already loaded at refresh time. The app's
+    // own native libs (e.g. the one doing signature checks) are dlopen'd later, so we hook the
+    // dlopen family and re-refresh after each load to keep newly-mapped libs covered.
+    using DlopenExtFn = void *(*)(const char *, int, const void *);
+    using DlopenFn = void *(*)(const char *, int);
+    static DlopenExtFn real_android_dlopen_ext = nullptr;
+    static DlopenFn real_dlopen = nullptr;
+
+    static void refreshHooks();
+
+    static void *hooked_android_dlopen_ext(const char *name, int flags, const void *extinfo) {
+        void *handle = real_android_dlopen_ext != nullptr
+                       ? real_android_dlopen_ext(name, flags, extinfo)
+                       : android_dlopen_ext(name, flags, static_cast<const android_dlextinfo *>(extinfo));
+        if (handle != nullptr) refreshHooks();
+        return handle;
+    }
+
+    static void *hooked_dlopen(const char *name, int flags) {
+        void *handle = real_dlopen != nullptr ? real_dlopen(name, flags) : dlopen(name, flags);
+        if (handle != nullptr) refreshHooks();
+        return handle;
+    }
+
+    static bool hooksRegistered = false;
+
+    static void refreshHooks() {
+        // xHook wants registrations set up once; xhook_refresh then (re)applies them to every
+        // currently-mapped library. We re-refresh after each dlopen to cover new libs.
+        if (!hooksRegistered) {
+            // Don't hook our own library or the dynamic linker.
+            xhook_ignore(".*/libnpatch\\.so$", nullptr);
+            xhook_ignore(".*/linker(64)?$", nullptr);
+
+            xhook_register(".*\\.so$", "openat", reinterpret_cast<void *>(hooked_openat),
+                           reinterpret_cast<void **>(&real_openat));
+            xhook_register(".*\\.so$", "openat64", reinterpret_cast<void *>(hooked_openat64),
+                           reinterpret_cast<void **>(&real_openat64));
+            xhook_register(".*\\.so$", "android_dlopen_ext",
+                           reinterpret_cast<void *>(hooked_android_dlopen_ext),
+                           reinterpret_cast<void **>(&real_android_dlopen_ext));
+            xhook_register(".*\\.so$", "dlopen", reinterpret_cast<void *>(hooked_dlopen),
+                           reinterpret_cast<void **>(&real_dlopen));
+            hooksRegistered = true;
+        }
+        xhook_refresh(0);
+    }
+
+    static void installOpenatHooks() { refreshHooks(); }
 
     LSP_DEF_NATIVE_METHOD(void, SigBypass, enableOpenatHook,
                           jstring jOrigApkPath,
                           jstring jCacheApkPath,
                           jstring jPkgName) {
-
         if (jOrigApkPath == nullptr || jCacheApkPath == nullptr) {
             LOGE("Invalid arguments: paths cannot be null.");
             return;
@@ -71,26 +149,10 @@ namespace vector::native {
             currentPackageName = strPkg.get();
         }
 
-        LOGI("Enable OpenAt Hook: %s -> %s (Pkg: %s)",
+        LOGI("Enable OpenAt Hook (xhook PLT): %s -> %s (Pkg: %s)",
              targetApkPath.c_str(), redirectApkPath.c_str(), currentPackageName.c_str());
 
-        auto r = HookOpenat(lsplant::InitInfo{
-                .inline_hooker =
-                [](auto t, auto r) {
-                    void *bk = nullptr;
-                    int ret = HookInline(t, r, &bk);
-                    if (ret == 0) openat_backup = bk;
-                    return ret == 0 ? bk : nullptr;
-                },
-                .art_symbol_resolver = [](auto symbol) {
-                    return GetC()->getSymbAddress(symbol);
-                },
-        });
-        if (!r) {
-            LOGE("Hook __openat (libc) fail");
-        }
-        // 无论 Hook 成功与否，都确保清除 libc.so 的 ElfImg
-        GetC(true);
+        installOpenatHooks();
     }
 
     LSP_DEF_NATIVE_METHOD(void, SigBypass, disableOpenatHook) {
@@ -99,7 +161,6 @@ namespace vector::native {
         redirectApkPath.clear();
     }
 
-    // 註冊 JNI 方法
     static JNINativeMethod gMethods[] = {
             LSP_NATIVE_METHOD(SigBypass, enableOpenatHook, "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"),
             LSP_NATIVE_METHOD(SigBypass, disableOpenatHook, "()V")
