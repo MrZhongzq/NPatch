@@ -161,7 +161,14 @@ namespace vector::native {
     static bool maps_line_is_suspicious(const char* line, size_t len) {
         static const char* kNames[] = {
                 "npatch", "lsposed", "riru", "zygisk", "magisk", "frida",
-                "/data/adb", "/data/local/tmp", "memfd:", nullptr};
+                "/data/adb", "/data/local/tmp", "memfd:",
+                // ART Java heap object spaces carry the framework's class-name strings
+                // ("xposed"/"lsposed"); they're too large to content-scan on every maps read, so
+                // drop them by name. The app reaches its heap via object pointers, not maps.
+                "dalvik-main space", "dalvik-large object space",
+                "dalvik-free list large object space", "dalvik-non moving space",
+                "dalvik-zygote space",
+                nullptr};
         for (int i = 0; kNames[i] != nullptr; ++i) {
             if (memmem(line, len, kNames[i], strlen(kNames[i])) != nullptr) return true;
         }
