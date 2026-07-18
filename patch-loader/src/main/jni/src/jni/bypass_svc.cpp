@@ -210,7 +210,7 @@ namespace vector::native {
         *budget = (*budget > off) ? (*budget - off) : 0;
         if (found) {
             std::string l(line, len > 0 && line[len - 1] == '\n' ? len - 1 : len);
-            LOGI("SvcBypass: KEYWORD region size={} '{}'", region_size, l.c_str());
+            LOGI("SvcBypass: KEYWORD region size={} read={} '{}'", region_size, off, l.c_str());
         }
     }
 
@@ -223,9 +223,10 @@ namespace vector::native {
         while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
         close(real_fd);
 
-        // Diagnostic keyword scan (log only), with a total byte budget to avoid ANR.
+        // Diagnostic keyword scan (log only) over ALL regions, with a total byte budget.
         int mem_fd = openat(AT_FDCWD, "/proc/self/mem", O_RDONLY | O_CLOEXEC);
-        size_t scan_budget = 64u * 1024u * 1024u;
+        LOGI("SvcBypass: diag mem_fd={} maps_bytes={}", mem_fd, content.size());
+        size_t scan_budget = 200u * 1024u * 1024u;
 
         std::string out;
         out.reserve(content.size());
@@ -235,8 +236,8 @@ namespace vector::native {
             size_t end = (nl == std::string::npos) ? content.size() : nl + 1;
             const char* line = content.data() + start;
             size_t len = end - start;
+            diag_scan_region(mem_fd, line, len, &scan_budget);  // scan every region
             if (!maps_line_is_suspicious(line, len)) {
-                diag_scan_region(mem_fd, line, len, &scan_budget);
                 out.append(line, len);
             }
             start = end;
