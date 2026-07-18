@@ -221,13 +221,18 @@ namespace vector::native {
         // Overlay every loadable segment's file-backed bytes with the current in-memory bytes.
         // Detectors CRC both .text (exec) and .data.rel.ro/.got (data) disk-vs-memory; the data
         // segment also legitimately differs after relocation, so we must mirror it too.
+        LOGI("SvcBypass: overlay match '{}' dlpi_addr={} phnum={} filesize={}",
+             ctx->soname, (void*) info->dlpi_addr, info->dlpi_phnum, ctx->content->size());
         for (int i = 0; i < info->dlpi_phnum; ++i) {
             const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
             if (ph->p_type != PT_LOAD) continue;
             uintptr_t mem_start = info->dlpi_addr + ph->p_vaddr;
             size_t off = static_cast<size_t>(ph->p_offset);
             size_t sz = static_cast<size_t>(ph->p_filesz);
-            if (sz > 0 && off + sz <= ctx->content->size()) {
+            bool fits = (sz > 0 && off + sz <= ctx->content->size());
+            LOGI("SvcBypass:   seg flags={} off={} vaddr={} filesz={} mem={} fits={}",
+                 ph->p_flags, off, (void*) ph->p_vaddr, sz, (void*) mem_start, fits ? 1 : 0);
+            if (fits) {
                 memcpy(&(*ctx->content)[off], reinterpret_cast<const void*>(mem_start), sz);
             }
         }
@@ -295,13 +300,7 @@ namespace vector::native {
                         || strstr(pathname, "map_files") || strstr(pathname, "pagemap"))) {
                     LOGI("SvcBypass: openat probe path='{}'", pathname);
                 }
-                // DIAGNOSTIC: deny /proc/self/mem to learn whether the detector's mem-side
-                // checks (lib integrity, keyword scan) rely on it.
-                if (pathname != nullptr && strcmp(pathname, "/proc/self/mem") == 0) {
-                    LOGI("SvcBypass: denying /proc/self/mem (diag)");
-                    req->result = -EACCES;
-                    handled = true;
-                } else if (is_hideable_maps_path(pathname)) {
+                if (is_hideable_maps_path(pathname)) {
                     int fd = build_filtered_proc_fd(pathname);
                     if (fd >= 0) {
                         req->result = fd;
