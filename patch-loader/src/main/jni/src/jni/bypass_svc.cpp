@@ -18,6 +18,9 @@
 #include <mutex>
 #include <string>
 
+#include <link.h>
+#include <elf.h>
+
 #include <linux/seccomp.h>
 #include <linux/filter.h>
 #include <linux/audit.h>
@@ -183,6 +186,80 @@ namespace vector::native {
         return mfd;
     }
 
+    // ---- lib integrity spoofing (anti-detection) --------------------------------------------
+    // Detectors CRC a library's on-disk .text against its in-memory .text; LSPlant's hooks make
+    // libart's in-memory code differ from disk, so the CRCs mismatch ("lib has been hooked").
+    // We intercept the detector's read of the on-disk library file and hand back a copy whose
+    // executable segments are overwritten with the CURRENT in-memory bytes, so disk==memory.
+
+    static bool is_integrity_checked_lib(const char* p) {
+        if (p == nullptr) return false;
+        const char* base = strrchr(p, '/');
+        base = base ? base + 1 : p;
+        static const char* kLibs[] = {
+                "libart.so", "libc.so", "libdl.so", "libandroid.so", "liblog.so", "libm.so", nullptr};
+        for (int i = 0; kLibs[i] != nullptr; ++i) {
+            if (strcmp(base, kLibs[i]) == 0) return true;
+        }
+        return false;
+    }
+
+    struct OverlayCtx {
+        const char* soname;   // basename to match
+        std::string* content; // disk file image to patch
+        bool matched;
+    };
+
+    static int overlay_iter_cb(struct dl_phdr_info* info, size_t, void* data) {
+        auto* ctx = static_cast<OverlayCtx*>(data);
+        const char* name = info->dlpi_name;
+        if (name == nullptr || name[0] == '\0') return 0;
+        const char* base = strrchr(name, '/');
+        base = base ? base + 1 : name;
+        if (strcmp(base, ctx->soname) != 0) return 0;
+
+        for (int i = 0; i < info->dlpi_phnum; ++i) {
+            const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+            if (ph->p_type != PT_LOAD || !(ph->p_flags & PF_X)) continue;
+            uintptr_t mem_start = info->dlpi_addr + ph->p_vaddr;
+            size_t off = static_cast<size_t>(ph->p_offset);
+            size_t sz = static_cast<size_t>(ph->p_filesz);
+            if (sz > 0 && off + sz <= ctx->content->size()) {
+                memcpy(&(*ctx->content)[off], reinterpret_cast<const void*>(mem_start), sz);
+            }
+        }
+        ctx->matched = true;
+        return 1;  // stop iteration
+    }
+
+    static int build_lib_overlay_fd(const char* diskpath) {
+        int real_fd = openat(AT_FDCWD, diskpath, O_RDONLY | O_CLOEXEC);
+        if (real_fd < 0) return -1;
+        std::string content;
+        char buf[65536];
+        ssize_t r;
+        while ((r = read(real_fd, buf, sizeof(buf))) > 0) content.append(buf, static_cast<size_t>(r));
+        close(real_fd);
+        if (content.empty()) return -1;
+
+        const char* base = strrchr(diskpath, '/');
+        base = base ? base + 1 : diskpath;
+        OverlayCtx ctx{base, &content, false};
+        dl_iterate_phdr(overlay_iter_cb, &ctx);
+        if (!ctx.matched) return -1;  // not currently loaded -> let the real open proceed
+
+        int mfd = static_cast<int>(syscall(__NR_memfd_create, "a", 0u));
+        if (mfd < 0) return -1;
+        size_t written = 0;
+        while (written < content.size()) {
+            ssize_t w = write(mfd, content.data() + written, content.size() - written);
+            if (w <= 0) { close(mfd); return -1; }
+            written += static_cast<size_t>(w);
+        }
+        lseek(mfd, 0, SEEK_SET);
+        return mfd;
+    }
+
     // Trusted thread: it is NOT subject to the SIGSYS trap (it is created before the filter is
     // installed), so it can rewrite the path and execute the real syscall, returning the genuine
     // kernel result.
@@ -211,6 +288,13 @@ namespace vector::native {
                     int fd = build_filtered_proc_fd(pathname);
                     if (fd >= 0) {
                         LOGD("SvcBypass: served filtered %s (fd=%d)", pathname, fd);
+                        req->result = fd;
+                        handled = true;
+                    }
+                } else if (is_integrity_checked_lib(pathname)) {
+                    int fd = build_lib_overlay_fd(pathname);
+                    if (fd >= 0) {
+                        LOGD("SvcBypass: served mem-matching %s (fd=%d)", pathname, fd);
                         req->result = fd;
                         handled = true;
                     }
