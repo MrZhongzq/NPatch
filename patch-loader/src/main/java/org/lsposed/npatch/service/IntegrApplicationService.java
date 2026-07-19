@@ -45,9 +45,7 @@ public class IntegrApplicationService extends ILSPApplicationService.Stub {
                 String modulePath = context.getCacheDir() + "/npatch/" + packageName + "/";
                 String cacheApkPath;
 
-                // Embedded modules live in the real installed apk (base.apk), not the resource dir
-                // (which now points at the origin cache); read them from sourceDir.
-                try (ZipFile sourceFile = new ZipFile(context.getApplicationInfo().sourceDir)) {
+                try (ZipFile sourceFile = new ZipFile(context.getPackageResourcePath())) {
                     ZipEntry entry = sourceFile.getEntry(Constants.EMBEDDED_MODULES_ASSET_PATH + name);
                     if (entry == null) {
                         Log.w(TAG, "Skipping module (entry not found in APK): " + name);

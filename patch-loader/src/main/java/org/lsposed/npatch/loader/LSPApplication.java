@@ -197,20 +197,22 @@ public class LSPApplication {
             Path cacheApkPath = OriginApkHelper.prepareOriginApk(appInfo, baseClassLoader, config.injectProvider);
             cachedOriginalApkPath = cacheApkPath.toString();
             String cacheApk = cacheApkPath.toString();
-            // Decouple the app-visible apk path from the resource dir. We DON'T redirect
-            // sourceDir/publicSourceDir/scanSourceDir any more: keeping them on the real installed
-            // base.apk means getApplicationInfo().sourceDir looks normal (anti-tamper path checks
-            // pass) and native libs load from the aligned installed apk. Resource/WebView
-            // consistency (the "No package ID 6a" / system-WebView provider fix) only needs the
-            // resource dir, so we point ONLY mResDir at the cached origin apk.
+            // Redirect EVERY apk-source field consistently to the cached origin apk. Only setting
+            // sourceDir/publicSourceDir leaves scanSourceDir and the LoadedApk's mResDir/
+            // mApplicationInfo pointing elsewhere (mResDir stays null), which makes resource
+            // resolution inconsistent — breaking e.g. "No package ID 6a" and the system-WebView
+            // provider class loading (createApplicationContext) that ~90% of apps rely on.
+            appInfo.sourceDir = cacheApk;
+            appInfo.publicSourceDir = cacheApk;
             appInfo.appComponentFactory = config.appComponentFactory;
+            trySetField(appInfo, "scanSourceDir", cacheApk);
+            trySetField(appInfo, "scanPublicSourceDir", cacheApk);
 
             var mPackages = (Map<?, ?>) XposedHelpers.getObjectField(activityThread, "mPackages");
             mPackages.remove(appInfo.packageName);
             appLoadedApk = activityThread.getPackageInfoNoCheck(appInfo, compatInfo);
 
-            // Keep both LoadedApks' ApplicationInfo consistent, and redirect only the resource dir
-            // to the cached origin apk.
+            // Keep both LoadedApks' ApplicationInfo and resource dir consistent with the cached apk.
             trySetField(appLoadedApk, "mApplicationInfo", appInfo);
             trySetField(stubLoadedApk, "mApplicationInfo", appInfo);
             trySetField(appLoadedApk, "mResDir", cacheApk);
