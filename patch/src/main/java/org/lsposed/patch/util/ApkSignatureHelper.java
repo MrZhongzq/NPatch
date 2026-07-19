@@ -1,5 +1,8 @@
 package org.lsposed.patch.util;
 
+import com.android.apksig.ApkVerifier;
+
+import java.io.File;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -7,7 +10,9 @@ import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.List;
 import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -47,11 +52,40 @@ public class ApkSignatureHelper {
     }
 
     public static String getApkSignInfo(String apkFilePath) {
+        // Prefer apksig's ApkVerifier (bundled transitively via apkzlib): it correctly locates the
+        // End-Of-Central-Directory even when the APK carries a ZIP comment (channel-packers like
+        // Walle/VasDolly, SignApk, etc.) and understands every signature scheme (v1/v2/v3/v3.1).
+        // The hand-rolled parsers below assume a comment-less ZIP and only recognise the v2 block
+        // id, so a comment or a v3-only signature (common on modern high-minSdk apps) silently made
+        // both return null -> "get original signature failed" on the very first patch.
+        String sig = getApkSignApksig(apkFilePath);
+        if (sig != null && !sig.isEmpty()) {
+            return sig;
+        }
+        // Fallback: legacy hand-rolled parsing, kept for resilience against exotic/broken packages.
         try {
             return getApkSignV2(apkFilePath);
         } catch (Exception e) {
             return getApkSignV1(apkFilePath);
         }
+    }
+
+    private static String getApkSignApksig(String apkFilePath) {
+        try {
+            ApkVerifier verifier = new ApkVerifier.Builder(new File(apkFilePath)).build();
+            ApkVerifier.Result result = verifier.verify();
+            // We only need the signer certificate, not a full integrity verdict: getSignerCertificates()
+            // is populated from whichever scheme block parsed successfully, so we don't gate on
+            // isVerified(). The first entry is the current (post-rotation) signing certificate, which is
+            // what PackageManager / detectors observe.
+            List<X509Certificate> certs = result.getSignerCertificates();
+            if (certs != null && !certs.isEmpty()) {
+                return new String(toChars(certs.get(0).getEncoded()));
+            }
+        } catch (Throwable ignored) {
+            // Fall through to the legacy parsers.
+        }
+        return null;
     }
 
     public static String getApkSignV1(String apkFilePath) {
