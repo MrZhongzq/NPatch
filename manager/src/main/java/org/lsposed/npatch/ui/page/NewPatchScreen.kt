@@ -56,8 +56,10 @@ import org.lsposed.npatch.ui.component.settings.SettingsEditor
 import org.lsposed.npatch.ui.component.settings.SettingsItem
 import org.lsposed.npatch.ui.page.destinations.SelectAppsScreenDestination
 import org.lsposed.npatch.util.Lv4Compat
+import org.lsposed.npatch.ui.util.InstallEventBus
 import org.lsposed.npatch.ui.util.InstallResultReceiver
 import org.lsposed.npatch.ui.util.LocalSnackbarHost
+import org.lsposed.npatch.ui.util.checkTargetSdkTooLow
 import org.lsposed.npatch.ui.util.checkIsApkFixedByLSP
 import org.lsposed.npatch.ui.util.installApk
 import org.lsposed.npatch.ui.util.installApks
@@ -551,11 +553,14 @@ private fun DoPatchBody(modifier: Modifier, navigator: DestinationsNavigator) {
                             if (status == PackageInstaller.STATUS_SUCCESS) {
                                 Log.i(TAG, "Install reported success, waiting for broadcast to navigate.")
                             } else if (status != NPackageManager.STATUS_USER_CANCELLED) {
-                                // 安装失败处理
-                                val result = snackbarHost.showSnackbar(installFailed, copyError)
+                                // 安装失败:直接把失败原因摘要显示在 snackbar 上(而不是固定的
+                                // "安装失败"),点动作复制完整信息。原因来自系统安装会话的最终广播
+                                // (如 targetSdk 过低 / INSTALL_FAILED_*),这样用户至少知道为什么失败。
+                                val summary = message?.trim()?.takeIf { it.isNotEmpty() }?.take(200) ?: installFailed
+                                val result = snackbarHost.showSnackbar(summary, copyError)
                                 if (result == SnackbarResult.ActionPerformed) {
                                     val cm = lspApp.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("NPatch", message))
+                                    cm.setPrimaryClip(ClipData.newPlainText("NPatch", message ?: installFailed))
                                 }
                             }
                             installation = null // Reset installation state
@@ -709,43 +714,60 @@ private fun InstallDialog2(patchApp: AppInfo, onFinish: (Int, String?) -> Unit) 
     val scope = rememberCoroutineScope()
     var uninstallFirst by remember { mutableStateOf(checkIsApkFixedByLSP(lspApp, patchApp.app.packageName)) }
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val splitInstallReceiver = remember { InstallResultReceiver() }
+    val installReceiver = remember { InstallResultReceiver() }
+    var installing by remember { mutableStateOf(false) }
+
+    // Single AND split apks now go through a PackageInstaller session, whose final verdict
+    // (SUCCESS / failure) arrives on InstallResultReceiver and is relayed here via InstallEventBus.
+    // This replaces the old single-apk ACTION_VIEW fire-and-forget path that reported nothing —
+    // the reason a too-low-targetSdk install (e.g. 360) looked like "tapped install, no response".
+    LaunchedEffect(Unit) {
+        InstallEventBus.events.collect { (status, message) ->
+            installing = false
+            onFinish(status, message)
+        }
+    }
 
     fun doInstall() {
         Log.i(TAG, "Installing app with system installer: ${patchApp.app.packageName}")
         val apkFiles = lspApp.targetApkFiles
-        if (apkFiles.isNullOrEmpty()){
-            onFinish(PackageInstaller.STATUS_FAILURE, "No target APK files found for installation")
+        if (apkFiles.isNullOrEmpty()) {
+            onFinish(PackageInstaller.STATUS_FAILURE, "未找到待安装的 APK 文件")
             return
         }
-        if (apkFiles.size > 1) {
-            scope.launch {
-                val success = installApks(lspApp, apkFiles)
+        // Pre-flight: fail fast with a clear reason when the base apk's targetSdk is below the
+        // OS install floor (the rootless installer otherwise gives a bare "app not installed").
+        checkTargetSdkTooLow(context, apkFiles.first())?.let { reason ->
+            Log.w(TAG, "targetSdk pre-check blocked install: $reason")
+            onFinish(PackageInstaller.STATUS_FAILURE, reason)
+            return
+        }
+        installing = true
+        scope.launch {
+            val committed = installApks(lspApp, apkFiles)
+            if (!committed) {
+                // Session couldn't even be created/committed (e.g. unknown-sources permission).
+                installing = false
                 onFinish(
-                    if (success) PackageInstaller.STATUS_SUCCESS else PackageInstaller.STATUS_FAILURE,
-                    if (success) "Split APKs installed successfully" else "Failed to install split APKs"
+                    PackageInstaller.STATUS_FAILURE,
+                    "无法启动安装会话:请确认已授予「安装未知应用」权限,或文件是否存在"
                 )
             }
-        } else  {
-            installApk(lspApp, apkFiles.first())
-            // For single APK install, the result is typically handled by onActivityResult,
-            // but since we are using a receiver for splits, we can unify later if needed.
-            // For now, system prompt is the feedback. We might need a better way to track this.
+            // On success the final verdict comes back through InstallResultReceiver -> InstallEventBus.
         }
     }
 
-    DisposableEffect(lifecycleOwner, context) {
+    DisposableEffect(context) {
         val intentFilter = IntentFilter(InstallResultReceiver.ACTION_INSTALL_STATUS)
         // Correctly handle receiver registration for different Android versions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(splitInstallReceiver, intentFilter, RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(installReceiver, intentFilter, RECEIVER_NOT_EXPORTED)
         } else {
-            context.registerReceiver(splitInstallReceiver, intentFilter)
+            context.registerReceiver(installReceiver, intentFilter)
         }
 
         onDispose {
-            context.unregisterReceiver(splitInstallReceiver)
+            context.unregisterReceiver(installReceiver)
         }
     }
 
@@ -753,8 +775,6 @@ private fun InstallDialog2(patchApp: AppInfo, onFinish: (Int, String?) -> Unit) 
         if (!uninstallFirst) {
             Log.d(TAG, "State changed to install, starting installation via system.")
             doInstall()
-            // Since system installer is an Intent, it's fire-and-forget. We can dismiss our UI.
-            onFinish(NPackageManager.STATUS_USER_CANCELLED, "Handed over to system installer")
         }
     }
 
@@ -767,6 +787,30 @@ private fun InstallDialog2(patchApp: AppInfo, onFinish: (Int, String?) -> Unit) 
                     uninstallApkByPackageName(lspApp, patchApp.app.packageName)
                     // After uninstall intent is sent, we can assume it will proceed.
                     uninstallFirst = false
+                }
+            }
+        )
+    }
+
+    if (installing) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = {
+                Text(
+                    modifier = Modifier.fillMaxWidth(),
+                    text = stringResource(R.string.installing),
+                    fontFamily = FontFamily.Serif,
+                    textAlign = TextAlign.Center
+                )
+            },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
                 }
             }
         )
