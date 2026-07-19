@@ -30,10 +30,13 @@ private:
 
     static bool is_own_lib(const char *name) {
         if (name == nullptr || name[0] == '\0') return false;
-        return strstr(name, "libnpatch") != nullptr
-               || strstr(name, "/npatch/") != nullptr
-               || strstr(name, "lsposed") != nullptr
-               || strstr(name, "riru") != nullptr;
+        // Match only our actual injected native library by basename. Do NOT match broad
+        // substrings like "/npatch/" — the patched app's own dex/oat is loaded from
+        // ".../cache/npatch/origin/", and hiding that would break the app's legitimate
+        // in-memory-dex integrity checks.
+        const char *base = strrchr(name, '/');
+        base = base ? base + 1 : name;
+        return strncmp(base, "libnpatch", 9) == 0;
     }
 
     static int filter_cb(struct dl_phdr_info *info, size_t size, void *data) {
