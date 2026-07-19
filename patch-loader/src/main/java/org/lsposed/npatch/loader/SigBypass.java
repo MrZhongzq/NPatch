@@ -141,7 +141,7 @@ public class SigBypass {
     private static void hookPackageArchiveInfo(Context context) {
         if (packageArchiveInfoHooked) return;
         try {
-            final String patchedApkPath = context.getPackageResourcePath();
+            final String patchedApkPath = context.getApplicationInfo().sourceDir;
             XC_MethodHook hook = new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
@@ -318,7 +318,7 @@ public class SigBypass {
         File cacheDir = new File(context.getCacheDir(), "npatch/origin");
         if (!cacheDir.exists()) cacheDir.mkdirs();
 
-        try (ZipFile sourceFile = new ZipFile(context.getPackageResourcePath())) {
+        try (ZipFile sourceFile = new ZipFile(context.getApplicationInfo().sourceDir)) {
             ZipEntry entry = sourceFile.getEntry(ORIGINAL_APK_ASSET_PATH);
             if (entry == null) {
                 Log.e(TAG, "Original APK not found in assets!");
@@ -371,7 +371,7 @@ public class SigBypass {
     }
 
     static void doSigBypass(Context context, int sigBypassLevel, String originalApkPath) throws IOException {
-        String currentApkPath = context.getPackageResourcePath();
+        String currentApkPath = context.getApplicationInfo().sourceDir;
         if (sigBypassLevel >= 2) {
             // NPatch prepares the embedded origin.apk through OriginApkHelper before this
             // point and hands us the extracted path; fall back to extracting it from the
