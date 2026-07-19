@@ -650,6 +650,16 @@ private fun InstallDialog(patchApp: AppInfo, onFinish: (Int, String?) -> Unit) {
 
     suspend fun doInstall() {
         Log.i(TAG, "Installing app ${patchApp.app.packageName}")
+        // Pre-flight: fail fast with a clear reason when the base apk's targetSdk is below the OS
+        // install floor (e.g. 360 hardened sample targets 23; the session otherwise fails with a
+        // bare INSTALL_FAILED_DEPRECATED_SDK_VERSION).
+        lspApp.targetApkFiles?.firstOrNull()?.let { f ->
+            checkTargetSdkTooLow(lspApp, f)?.let { reason ->
+                Log.w(TAG, "targetSdk pre-check blocked install: $reason")
+                onFinish(PackageInstaller.STATUS_FAILURE, reason)
+                return
+            }
+        }
         installing = 1
         val (status, message) = NPackageManager.install()
         installing = 0
@@ -659,7 +669,10 @@ private fun InstallDialog(patchApp: AppInfo, onFinish: (Int, String?) -> Unit) {
 
     LaunchedEffect(uninstallFirst) {
         if (!uninstallFirst && installing == 0) {
-            onFinish(NPackageManager.STATUS_USER_CANCELLED, "User cancelled")
+            // Do NOT call onFinish(USER_CANCELLED) before doInstall(): it sets installation=null,
+            // which disposes this dialog and cancels THIS LaunchedEffect coroutine mid-install, so
+            // doInstall()'s real onFinish(status, message) never runs and the failure is silently
+            // swallowed ("tapped install, no feedback"). Just install; doInstall reports the verdict.
             doInstall()
         }
     }
