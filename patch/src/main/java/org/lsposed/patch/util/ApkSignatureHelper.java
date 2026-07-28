@@ -62,12 +62,56 @@ public class ApkSignatureHelper {
         if (sig != null && !sig.isEmpty()) {
             return sig;
         }
+        // Extract-only fallback: some inputs are apks that were already statically patched by
+        // another tool (dex modified, v2/v3 stripped) but still carry the original v1 cert block in
+        // META-INF/*.(RSA|DSA|EC). Every path above insists the apk *verify* before it will hand
+        // over a certificate — apksig fails v1 integrity because the manifest digests no longer
+        // match the tampered dex, and JarFile.getCertificates() (getApkSignV1) has the same
+        // requirement. Here we only need the signer's certificate, not an integrity verdict, so we
+        // parse the PKCS#7 block directly and skip digest checking entirely.
+        sig = getApkSignPkcs7CertOnly(apkFilePath);
+        if (sig != null && !sig.isEmpty()) {
+            return sig;
+        }
         // Fallback: legacy hand-rolled parsing, kept for resilience against exotic/broken packages.
         try {
             return getApkSignV2(apkFilePath);
         } catch (Exception e) {
             return getApkSignV1(apkFilePath);
         }
+    }
+
+    // Reads the signer certificate straight out of the v1 PKCS#7 block (META-INF/*.RSA|DSA|EC)
+    // WITHOUT verifying any file digests. Works even when the apk was re-packaged/tampered and had
+    // its v2/v3 signatures stripped, as long as the original v1 cert block is still present. The
+    // X.509 CertificateFactory understands PKCS#7 SignedData and returns its embedded certs; the
+    // first one is the signer's (post-rotation) leaf, matching what PackageManager reports.
+    private static String getApkSignPkcs7CertOnly(String apkFilePath) {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(apkFilePath)) {
+            Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                java.util.zip.ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                String upper = name.toUpperCase();
+                if (!upper.startsWith("META-INF/") || name.indexOf('/', "META-INF/".length()) >= 0) {
+                    continue; // signature blocks live directly under META-INF/, not in subdirs
+                }
+                if (!(upper.endsWith(".RSA") || upper.endsWith(".DSA") || upper.endsWith(".EC"))) {
+                    continue;
+                }
+                try (InputStream is = zip.getInputStream(entry)) {
+                    java.security.cert.CertificateFactory cf =
+                            java.security.cert.CertificateFactory.getInstance("X.509");
+                    for (Certificate cert : cf.generateCertificates(is)) {
+                        if (cert instanceof X509Certificate) {
+                            return new String(toChars(cert.getEncoded()));
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private static String getApkSignApksig(String apkFilePath) {
