@@ -77,4 +77,6 @@ dependencies {
     implementation(projects.share.java)
 
     implementation(libs.gson)
+
+    testImplementation("junit:junit:4.13.2")
 }

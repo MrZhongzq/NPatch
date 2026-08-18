@@ -129,4 +129,6 @@ dependencies {
     debugImplementation(npatch.androidx.compose.ui.tooling)
     debugImplementation(npatch.androidx.customview)
     debugImplementation(npatch.androidx.customview.poolingcontainer)
+
+    testImplementation("junit:junit:4.13.2")
 }

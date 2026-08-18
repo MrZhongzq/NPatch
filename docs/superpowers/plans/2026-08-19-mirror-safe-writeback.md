@@ -6,7 +6,9 @@
 
 **Architecture:** 核心逻辑抽成不依赖 Android 框架的纯类(File/Map/Gson),JVM 单测覆盖;Android 胶水(provider/Shizuku/UI/loader 接线)薄封装,真机验证。真实 `databases/` 只在目标 app 启动早期、db 未打开时由 patch-loader 用 app 自己 uid 应用。
 
-**Tech Stack:** Kotlin/Java, Gson(已有), JUnit4(新增 test 依赖), Android(manager=app, patch-loader=library, share=java-library)。
+**Tech Stack:** Kotlin/Java, Gson(已有), JUnit4, Android(manager=app, patch-loader=library, share=java-library)。
+
+> **执行偏离(2026-08-19)**: 本机只装 NDK 25.2,项目需 NDK 29,本地 Gradle 跑不了单测;CI 也未配 test task。故 Task 1-4 的纯逻辑类**用 Java 实现**(本机有 javac 无 kotlinc),用独立 JVM(javac + gradle 缓存里的 gson/junit/hamcrest jar,直接指向项目真实源文件)跑单测验证红→绿。正式代码入项目供 CI 构建。接口语义与下文 Kotlin 签名一致,仅语言改为 Java(data class→带 equals/hashCode 的 class)。
 
 **Spec:** `docs/superpowers/specs/2026-08-19-mirror-safe-writeback-design.md`
 
