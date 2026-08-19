@@ -25,6 +25,7 @@ import kotlinx.parcelize.Parcelize
 import me.zhanghai.android.appiconloader.AppIconLoader
 import org.lsposed.npatch.config.ConfigManager
 import org.lsposed.npatch.config.Configs
+import org.lsposed.npatch.manager.MirrorSyncManager
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.Constants
 import java.io.File
@@ -103,7 +104,10 @@ object NPackageManager {
         }
     }
 
-    suspend fun install(): Pair<Int, String?> {
+    suspend fun install(): Pair<Int, String?> = MirrorSyncManager.pausingSync {
+        // Pause mirror sync for the whole install: overwriting a patched app freezes/kills its
+        // process, and a concurrent mirror round querying that app's provider caused a frozen-binder
+        // storm that SIGKILLed the manager (real crash on QQ re-patch install).
         Log.i(TAG, "Perform install patched apks")
         var status = PackageInstaller.STATUS_FAILURE
         var message: String? = null
@@ -172,10 +176,10 @@ object NPackageManager {
                 Log.e(TAG, "Installation failed", it)
             }
         }
-        return Pair(status, message)
+        Pair(status, message)
     }
 
-    suspend fun uninstall(packageName: String): Pair<Int, String?> {
+    suspend fun uninstall(packageName: String): Pair<Int, String?> = MirrorSyncManager.pausingSync {
         var status = PackageInstaller.STATUS_FAILURE
         var message: String? = null
         withContext(Dispatchers.IO) {
@@ -201,7 +205,7 @@ object NPackageManager {
                 message = "Exception happened\n$it"
             }
         }
-        return Pair(status, message)
+        Pair(status, message)
     }
 
     suspend fun getAppInfoFromApks(apks: List<Uri>): Result<List<AppInfo>> {

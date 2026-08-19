@@ -103,6 +103,14 @@ object MirrorSyncManager {
         return runCatching { loadMirrorTargets(context).isNotEmpty() }.getOrDefault(false)
     }
 
+    /**
+     * Run [block] with mirror sync paused (holding the same mutex a sync round takes). Installing a
+     * patched app freezes/kills its process; if a mirror round is concurrently querying that app's
+     * ContentProvider it triggers a dead/frozen-binder transaction storm that gets the whole manager
+     * SIGKILLed. Wrap install/uninstall in this so mirror never touches an app being (re)installed.
+     */
+    suspend fun <T> pausingSync(block: suspend () -> T): T = syncMutex.withLock { block() }
+
     /** Whether a package has a ready write-back staging awaiting apply on next app start. */
     fun isWritebackPending(context: Context, packageName: String): Boolean {
         return WriteBackQueue.isPending(File(context.filesDir, QUEUE_FILE), packageName)
