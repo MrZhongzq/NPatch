@@ -63,6 +63,15 @@ public class MirrorManifestTest {
     }
 
     @Test
+    public void isSdcardfsSafe_rejects_illegal_chars() {
+        assertTrue(MirrorManifest.isSdcardfsSafe("databases/a.db"));
+        assertTrue(MirrorManifest.isSdcardfsSafe("files/sub/b.txt"));
+        assertFalse(MirrorManifest.isSdcardfsSafe("cache/http:/x?b=qq&e=1")); // ':' and '?'
+        assertFalse(MirrorManifest.isSdcardfsSafe("databases/beacon_db:qzone")); // ':'
+        assertFalse(MirrorManifest.isSdcardfsSafe("a/b*c"));
+    }
+
+    @Test
     public void write_then_parse_roundtrip() throws Exception {
         File root = tmp();
         write(new File(root, "d1/f1"), "abc");

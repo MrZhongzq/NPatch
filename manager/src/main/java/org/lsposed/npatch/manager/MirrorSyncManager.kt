@@ -222,10 +222,12 @@ object MirrorSyncManager {
         allPaths.addAll(changeSet.deleted)
 
         for (relPath in allPaths) {
-            // Per-file isolation: one bad entry must never abort the whole root. QQ caches files
-            // named by URL ('http://qh.qlogo.cn/...?b=qq&ek=...'), whose ':' '?' '&' are illegal on
-            // the sdcardfs mirror -> open EPERM. Without this, that single file aborted the root and
-            // databases/ never synced (and the baseline never got saved). Skip the file, carry on.
+            // Names illegal on the sdcardfs mirror (QQ's URL-named caches with ':' '?', ':'-named
+            // dbs, ...) can NEVER be created there — skip up front with a string check instead of a
+            // per-file copyRemoteToLocal open()->EPERM->log. Thousands of such files were the
+            // dominant cost after the manifest removed the per-directory query IPC.
+            if (!MirrorManifest.isSdcardfsSafe(relPath)) continue
+            // Per-file isolation: one remaining bad entry must never abort the whole root.
             runCatching {
                 val manuallyChanged = changeSet.added.contains(relPath) ||
                     changeSet.modified.contains(relPath) ||

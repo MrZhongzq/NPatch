@@ -79,6 +79,22 @@ public final class MirrorManifest {
         }
     }
 
+    /**
+     * Whether {@code relPath} can exist on the sdcardfs/FAT-derived mirror. QQ names caches by URL
+     * ('http://qh.qlogo.cn/...?b=qq') and some dbs with ':' — those chars are illegal there, so such
+     * files can never be mirrored and must be skipped up front instead of a per-file open()->EPERM.
+     * '/' is the path separator and stays allowed.
+     */
+    public static boolean isSdcardfsSafe(String relPath) {
+        for (int i = 0; i < relPath.length(); i++) {
+            char c = relPath.charAt(i);
+            if (c == ':' || c == '?' || c == '*' || c == '"' || c == '<' || c == '>' || c == '|' || c == '\\') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Parse one manifest line; returns null on a malformed line (too few fields / bad numbers). */
     public static Entry parseLine(String line) {
         if (line == null || line.isEmpty()) {
