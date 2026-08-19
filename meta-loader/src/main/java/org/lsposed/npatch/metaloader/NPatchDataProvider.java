@@ -10,17 +10,24 @@ import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.webkit.MimeTypeMap;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
+
+import org.lsposed.npatch.share.MirrorManifest;
 
 public final class NPatchDataProvider extends ContentProvider {
 
     private static final String PATH_DOCUMENT = "document";
     private static final String PATH_CHILDREN = "children";
     private static final String PATH_FILE = "file";
+    private static final String PATH_MANIFEST = "manifest";
 
     private static final String METHOD_MKDIRS = "npatch:mkdirs";
     private static final String METHOD_DELETE = "npatch:delete";
@@ -119,10 +126,14 @@ public final class NPatchDataProvider extends ContentProvider {
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        if (!PATH_FILE.equals(firstPathSegment(uri))) {
+        String seg = firstPathSegment(uri);
+        String documentId = uri.getQueryParameter(EXTRA_DOCUMENT_ID);
+        if (PATH_MANIFEST.equals(seg)) {
+            return openManifest(documentId, uri);
+        }
+        if (!PATH_FILE.equals(seg)) {
             throw new FileNotFoundException(uri.toString());
         }
-        String documentId = uri.getQueryParameter(EXTRA_DOCUMENT_ID);
         File target = resolveDocumentFile(documentId, false);
         if (target == null) {
             throw new FileNotFoundException(uri.toString());
@@ -134,6 +145,31 @@ public final class NPatchDataProvider extends ContentProvider {
             }
         }
         return ParcelFileDescriptor.open(target, ParcelFileDescriptor.parseMode(mode));
+    }
+
+    // Stream the whole subtree manifest over a pipe: the provider (in the target app process) walks
+    // the tree with local File APIs and writes one line per entry, instead of the manager issuing
+    // one binder query per directory. Read side is returned immediately; a worker thread produces.
+    private ParcelFileDescriptor openManifest(String documentId, Uri uri) throws FileNotFoundException {
+        File root = resolveDocumentFile(documentId, true);
+        if (root == null || !root.isDirectory()) {
+            throw new FileNotFoundException(uri.toString());
+        }
+        try {
+            ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+            final ParcelFileDescriptor readEnd = pipe[0];
+            final ParcelFileDescriptor writeEnd = pipe[1];
+            new Thread(() -> {
+                try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                        new ParcelFileDescriptor.AutoCloseOutputStream(writeEnd), StandardCharsets.UTF_8))) {
+                    MirrorManifest.write(root, w);
+                } catch (Throwable ignored) {
+                }
+            }, "npatch-manifest").start();
+            return readEnd;
+        } catch (IOException e) {
+            throw new FileNotFoundException(e.getMessage());
+        }
     }
 
     @Override
