@@ -18,11 +18,14 @@ import kotlinx.coroutines.withContext
 import org.lsposed.npatch.manager.mirror.MirrorBaseline
 import org.lsposed.npatch.manager.mirror.SyncDecision
 import org.lsposed.npatch.manager.mirror.WriteBackQueue
+import org.lsposed.npatch.share.MirrorManifest
 import org.lsposed.npatch.share.PatchConfig
 import org.lsposed.npatch.share.WritebackManifest
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 
 /**
  * Mirrors a patched app's private data (via the app-process [NPatchDataProvider]) to shared storage
@@ -48,6 +51,7 @@ object MirrorSyncManager {
     private const val PATH_CHILDREN = "children"
     private const val PATH_DOCUMENT = "document"
     private const val PATH_FILE = "file"
+    private const val PATH_MANIFEST = "manifest"
     private const val METHOD_DELETE = "npatch:delete"
     private const val EXTRA_DOCUMENT_ID = "id"
     private const val ROOT_DATA = "data"
@@ -80,6 +84,11 @@ object MirrorSyncManager {
         val isDirectory: Boolean
             get() = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
     }
+
+    private data class RemoteListing(
+        val files: Map<String, RemoteEntry>,
+        val dirs: List<String>
+    )
 
     suspend fun syncConfiguredApps(context: Context) = withContext(Dispatchers.IO) {
         syncMutex.withLock {
@@ -194,7 +203,13 @@ object MirrorSyncManager {
         } else {
             MirrorBaseline.diff(MirrorBaseline.snapshot(localRootDir), baseline)
         }
-        val remoteFiles = collectRemoteFiles(resolver, target.authority, rootDocumentId)
+        // One streamed manifest (1 IPC) instead of the per-directory query storm; fall back to the
+        // recursive path for older apps whose provider lacks the manifest PATH.
+        val listing = readRemoteManifest(resolver, target.authority, rootDocumentId)
+        val remoteFiles = listing?.files ?: collectRemoteFiles(resolver, target.authority, rootDocumentId)
+        // Sync empty directories too (create-only): the mirror reflects the full structure so the
+        // user can drop a .nomedia into an otherwise-empty dir (decision 3).
+        listing?.dirs?.forEach { runCatching { File(localRootDir, it).mkdirs() } }
         val isDataRoot = rootName == ROOT_DATA
 
         val puts = ArrayList<String>()
@@ -245,6 +260,41 @@ object MirrorSyncManager {
             writeStaging(resolver, target, localRootDir, puts, deletes)
             WriteBackQueue.markReady(queueFile, target.packageName)
         }
+    }
+
+    /**
+     * Read the whole remote subtree in ONE streamed manifest (one IPC) instead of the per-directory
+     * query storm of [collectRemoteFiles]. Returns null when the provider has no manifest PATH (an
+     * older, not-re-patched app) so the caller falls back to the recursive path.
+     */
+    private fun readRemoteManifest(
+        resolver: ContentResolver,
+        authority: String,
+        rootDocumentId: String
+    ): RemoteListing? {
+        return runCatching {
+            resolver.openFileDescriptor(buildManifestUri(authority, rootDocumentId), "r")?.use { pfd ->
+                val files = HashMap<String, RemoteEntry>()
+                val dirs = ArrayList<String>()
+                BufferedReader(InputStreamReader(FileInputStream(pfd.fileDescriptor), Charsets.UTF_8)).use { reader ->
+                    reader.lineSequence().forEach { line ->
+                        val e = MirrorManifest.parseLine(line) ?: return@forEach
+                        if (e.type == MirrorManifest.TYPE_DIR) {
+                            dirs.add(e.path)
+                        } else {
+                            files[e.path] = RemoteEntry(
+                                documentId = "$rootDocumentId/${e.path}",
+                                displayName = e.path.substringAfterLast('/'),
+                                mimeType = "application/octet-stream",
+                                lastModified = e.mtime,
+                                size = e.size
+                            )
+                        }
+                    }
+                }
+                RemoteListing(files, dirs)
+            }
+        }.getOrNull()
     }
 
     /** Recursively collect every remote file under [rootDocumentId], keyed by path relative to it. */
@@ -439,6 +489,15 @@ object MirrorSyncManager {
             .scheme("content")
             .authority(authority)
             .appendPath(PATH_FILE)
+            .appendQueryParameter(EXTRA_DOCUMENT_ID, documentId)
+            .build()
+    }
+
+    private fun buildManifestUri(authority: String, documentId: String): Uri {
+        return Uri.Builder()
+            .scheme("content")
+            .authority(authority)
+            .appendPath(PATH_MANIFEST)
             .appendQueryParameter(EXTRA_DOCUMENT_ID, documentId)
             .build()
     }
