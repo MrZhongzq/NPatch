@@ -108,6 +108,19 @@ public class LSPApplication {
             return;
         }
 
+        // Apply any pending mirror write-back BEFORE the host app initializes / opens its databases.
+        // This is the ONLY safe window to touch the real app data in a rootless design: app uid, and
+        // no SQLite handle is live yet (host Application.onCreate runs after onLoad returns). See
+        // MirrorSyncManager (staging) / WritebackApplier (apply).
+        if (config.mirrorMode) {
+            try {
+                boolean applied = WritebackApplier.applyIfPending(new File(context.getApplicationInfo().dataDir));
+                if (applied) log("Applied pending mirror write-back staging");
+            } catch (Throwable t) {
+                log("Mirror write-back apply failed (ignored)", t);
+            }
+        }
+
         log("Initialize service client");
         ILSPApplicationService service = null;
 

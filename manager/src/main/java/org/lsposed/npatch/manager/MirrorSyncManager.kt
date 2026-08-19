@@ -15,27 +15,45 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.lsposed.npatch.manager.mirror.MirrorBaseline
+import org.lsposed.npatch.manager.mirror.SyncDecision
+import org.lsposed.npatch.manager.mirror.WriteBackQueue
 import org.lsposed.npatch.share.PatchConfig
+import org.lsposed.npatch.share.WritebackManifest
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.util.Locale
 
+/**
+ * Mirrors a patched app's private data (via the app-process [NPatchDataProvider]) to shared storage
+ * so it is browsable/backup-able with any file manager, and writes user edits back safely.
+ *
+ * IMPORTANT (see docs/superpowers/specs/2026-08-19-mirror-safe-writeback-design.md): the old design
+ * did a bidirectional file sync every 30s, guessing direction from mtime/size. That truncated and
+ * corrupted the LIVE SQLite databases of running apps (e.g. QQ chat records). This version:
+ *   - EXPORT (app -> mirror) is always read-only ("r"); it never writes the real data.
+ *   - WRITE-BACK (mirror -> app) happens ONLY for files the user manually changed in the mirror
+ *     (detected against a baseline), and never touches the live databases directly. Instead it stages
+ *     the changes under <dataDir>/npatch_writeback/ and the patch-loader applies them at app startup,
+ *     before any database is opened.
+ * Write-back is currently limited to the internal data root (where SQLite lives); other roots export
+ * only for now.
+ */
 object MirrorSyncManager {
 
     private const val TAG = "MirrorSyncManager"
     private const val META_DATA_KEY = "npatch"
     private const val MIRROR_DIR_NAME = "SAF"
     private const val PROVIDER_SUFFIX = ".NPatchDataProvider"
-    private const val PATH_DOCUMENT = "document"
     private const val PATH_CHILDREN = "children"
+    private const val PATH_DOCUMENT = "document"
     private const val PATH_FILE = "file"
-    private const val METHOD_MKDIRS = "npatch:mkdirs"
     private const val METHOD_DELETE = "npatch:delete"
-    private const val METHOD_SET_LAST_MODIFIED = "npatch:setLastModified"
     private const val EXTRA_DOCUMENT_ID = "id"
-    private const val EXTRA_TIME = "time"
-    private const val TIMESTAMP_TOLERANCE_MS = 2000L
+    private const val ROOT_DATA = "data"
+
+    private const val BASELINE_DIR = "mirror_baseline"
+    private const val QUEUE_FILE = "mirror_writeback_queue.json"
 
     private val gson = Gson()
     private val syncMutex = Mutex()
@@ -69,9 +87,11 @@ object MirrorSyncManager {
             if (!baseDir.exists()) {
                 baseDir.mkdirs()
             }
+            val baselineDir = File(context.filesDir, BASELINE_DIR)
+            val queueFile = File(context.filesDir, QUEUE_FILE)
             for (target in loadMirrorTargets(context)) {
                 runCatching {
-                    syncTarget(context, target, File(baseDir, target.packageName))
+                    syncTarget(context, target, File(baseDir, target.packageName), baselineDir, queueFile)
                 }.onFailure {
                     Log.w(TAG, "Mirror sync failed for ${target.packageName}", it)
                 }
@@ -83,7 +103,18 @@ object MirrorSyncManager {
         return runCatching { loadMirrorTargets(context).isNotEmpty() }.getOrDefault(false)
     }
 
-    private fun syncTarget(context: Context, target: MirrorTarget, mirrorRoot: File) {
+    /** Whether a package has a ready write-back staging awaiting apply on next app start. */
+    fun isWritebackPending(context: Context, packageName: String): Boolean {
+        return WriteBackQueue.isPending(File(context.filesDir, QUEUE_FILE), packageName)
+    }
+
+    private fun syncTarget(
+        context: Context,
+        target: MirrorTarget,
+        mirrorRoot: File,
+        baselineDir: File,
+        queueFile: File
+    ) {
         val resolver = context.contentResolver
         val rootEntry = queryRemoteEntry(resolver, target.authority, target.packageName)
         if (rootEntry == null) {
@@ -96,125 +127,147 @@ object MirrorSyncManager {
         if (!mirrorRoot.exists()) {
             mirrorRoot.mkdirs()
         }
-        syncDirectory(resolver, target.authority, rootEntry, mirrorRoot)
-    }
 
-    private fun syncDirectory(
-        resolver: ContentResolver,
-        authority: String,
-        remoteDir: RemoteEntry,
-        localDir: File
-    ) {
-        if (localDir.isFile) {
-            localDir.delete()
-        }
-        if (!localDir.exists()) {
-            localDir.mkdirs()
-        }
+        // The loader records an "applied" marker after it consumes a staging on app start. Seeing it
+        // means our write-back landed: dequeue and reset the data-root baseline so the next round
+        // re-exports from the app's new state (rather than re-detecting the just-applied files as
+        // manual changes).
+        handleAppliedMarker(resolver, target, baselineDir, queueFile)
 
-        val remoteChildren = listRemoteChildren(resolver, authority, remoteDir.documentId).associateBy { it.displayName }
-        val localChildren = localDir.listFiles().orEmpty().associateBy { it.name }
-        val names = linkedSetOf<String>().apply {
-            addAll(remoteChildren.keys)
-            addAll(localChildren.keys)
-        }
-
-        for (name in names.sorted()) {
-            val remoteChild = remoteChildren[name]
-            val localChild = localChildren[name] ?: File(localDir, name)
-            val documentId = remoteChild?.documentId ?: joinDocumentId(remoteDir.documentId, name)
+        for (rootDir in listRemoteChildren(resolver, target.authority, target.packageName)) {
+            if (!rootDir.isDirectory) continue
             runCatching {
-                syncEntry(resolver, authority, documentId, remoteChild, localChild)
+                syncRoot(
+                    resolver, target, rootDir.displayName, rootDir.documentId,
+                    File(mirrorRoot, rootDir.displayName), baselineDir, queueFile
+                )
             }.onFailure {
-                Log.w(TAG, "Skipping mirror entry $documentId", it)
+                Log.w(TAG, "Mirror root '${rootDir.displayName}' failed for ${target.packageName}", it)
             }
         }
     }
 
-    private fun syncEntry(
+    private fun handleAppliedMarker(
         resolver: ContentResolver,
-        authority: String,
-        documentId: String,
-        remoteEntry: RemoteEntry?,
-        localFile: File
+        target: MirrorTarget,
+        baselineDir: File,
+        queueFile: File
     ) {
-        val remote = remoteEntry ?: queryRemoteEntry(resolver, authority, documentId)
-        val localExists = localFile.exists()
-        if (remote == null && !localExists) {
+        val markerId = "${target.packageName}/$ROOT_DATA/files/${WritebackManifest.APPLIED_MARKER}"
+        if (queryRemoteEntry(resolver, target.authority, markerId) == null) {
             return
         }
+        deleteRemoteEntry(resolver, target.authority, markerId)
+        WriteBackQueue.clear(queueFile, target.packageName)
+        File(baselineDir, "${target.packageName}__$ROOT_DATA.json").delete()
+    }
 
-        if (remote != null && remote.isDirectory) {
-            if (!localExists || localFile.isDirectory) {
-                syncDirectory(resolver, authority, remote, localFile)
-            } else {
-                resolveTypeConflict(resolver, authority, documentId, remote, localFile)
-            }
-            return
-        }
+    private fun syncRoot(
+        resolver: ContentResolver,
+        target: MirrorTarget,
+        rootName: String,
+        rootDocumentId: String,
+        localRootDir: File,
+        baselineDir: File,
+        queueFile: File
+    ) {
+        if (localRootDir.isFile) localRootDir.delete()
+        if (!localRootDir.exists()) localRootDir.mkdirs()
 
-        if (localExists && localFile.isDirectory) {
-            if (remote == null) {
-                if (ensureRemoteDirectory(resolver, authority, documentId)) {
-                    queryRemoteEntry(resolver, authority, documentId)?.let {
-                        syncDirectory(resolver, authority, it, localFile)
+        val baselineKey = "${target.packageName}__$rootName"
+        val baseline = MirrorBaseline.load(baselineDir, baselineKey)
+        val changeSet = MirrorBaseline.diff(MirrorBaseline.snapshot(localRootDir), baseline)
+        val remoteFiles = collectRemoteFiles(resolver, target.authority, rootDocumentId)
+        val isDataRoot = rootName == ROOT_DATA
+
+        val puts = ArrayList<String>()
+        val deletes = ArrayList<String>()
+
+        val allPaths = HashSet<String>()
+        allPaths.addAll(remoteFiles.keys)
+        allPaths.addAll(changeSet.added)
+        allPaths.addAll(changeSet.modified)
+        allPaths.addAll(changeSet.deleted)
+
+        for (relPath in allPaths) {
+            val manuallyChanged = changeSet.added.contains(relPath) ||
+                changeSet.modified.contains(relPath) ||
+                changeSet.deleted.contains(relPath)
+            val remoteEntry = remoteFiles[relPath]
+            val localFile = File(localRootDir, relPath)
+            val remoteChanged = remoteEntry != null &&
+                (!localFile.exists() || localFile.length() != remoteEntry.size ||
+                    remoteEntry.lastModified > localFile.lastModified())
+
+            when (SyncDecision.decide(manuallyChanged, remoteChanged)) {
+                SyncDecision.Action.EXPORT ->
+                    if (remoteEntry != null) copyRemoteToLocal(resolver, target.authority, remoteEntry, localFile)
+                SyncDecision.Action.WRITEBACK ->
+                    if (isDataRoot) {
+                        if (changeSet.deleted.contains(relPath)) deletes.add(relPath) else puts.add(relPath)
                     }
-                }
-            } else {
-                resolveTypeConflict(resolver, authority, documentId, remote, localFile)
+                SyncDecision.Action.SKIP -> {}
             }
-            return
         }
 
-        when {
-            remote == null && localExists -> copyLocalToRemote(resolver, authority, documentId, localFile)
-            remote != null && !localExists -> copyRemoteToLocal(resolver, authority, remote, localFile)
-            remote != null && localExists -> {
-                val localNewer = localFile.lastModified() > remote.lastModified + TIMESTAMP_TOLERANCE_MS
-                val remoteNewer = remote.lastModified > localFile.lastModified() + TIMESTAMP_TOLERANCE_MS
-                val sizeDifferent = localFile.length() != remote.size
-                when {
-                    localNewer -> copyLocalToRemote(resolver, authority, documentId, localFile)
-                    remoteNewer -> copyRemoteToLocal(resolver, authority, remote, localFile)
-                    sizeDifferent -> {
-                        if (localFile.lastModified() >= remote.lastModified) {
-                            copyLocalToRemote(resolver, authority, documentId, localFile)
-                        } else {
-                            copyRemoteToLocal(resolver, authority, remote, localFile)
-                        }
-                    }
-                }
-            }
+        // Baseline reflects the mirror as the sync engine left it, so the user's just-staged edits
+        // are not re-detected next round (the loader's applied-marker resets it after apply).
+        MirrorBaseline.save(baselineDir, baselineKey, MirrorBaseline.snapshot(localRootDir))
+
+        if (isDataRoot && (puts.isNotEmpty() || deletes.isNotEmpty())) {
+            writeStaging(resolver, target, localRootDir, puts, deletes)
+            WriteBackQueue.markReady(queueFile, target.packageName)
         }
     }
 
-    private fun resolveTypeConflict(
+    /** Recursively collect every remote file under [rootDocumentId], keyed by path relative to it. */
+    private fun collectRemoteFiles(
         resolver: ContentResolver,
         authority: String,
-        documentId: String,
-        remoteEntry: RemoteEntry,
-        localFile: File
-    ) {
-        val localWins = localFile.lastModified() >= remoteEntry.lastModified
-        if (localWins) {
-            deleteRemoteEntry(resolver, authority, documentId)
-            if (localFile.isDirectory) {
-                if (ensureRemoteDirectory(resolver, authority, documentId)) {
-                    queryRemoteEntry(resolver, authority, documentId)?.let {
-                        syncDirectory(resolver, authority, it, localFile)
-                    }
-                }
-            } else {
-                copyLocalToRemote(resolver, authority, documentId, localFile)
-            }
-        } else {
-            localFile.deleteRecursively()
-            if (remoteEntry.isDirectory) {
-                syncDirectory(resolver, authority, remoteEntry, localFile)
-            } else {
-                copyRemoteToLocal(resolver, authority, remoteEntry, localFile)
+        rootDocumentId: String
+    ): Map<String, RemoteEntry> {
+        val out = HashMap<String, RemoteEntry>()
+        fun recurse(documentId: String, prefix: String) {
+            for (child in listRemoteChildren(resolver, authority, documentId)) {
+                val rel = if (prefix.isEmpty()) child.displayName else "$prefix/${child.displayName}"
+                if (child.isDirectory) recurse(child.documentId, rel) else out[rel] = child
             }
         }
+        recurse(rootDocumentId, "")
+        return out
+    }
+
+    /**
+     * Stage the manual changes into <dataDir>/npatch_writeback/ via the provider (writing to the
+     * staging dir only — never the live databases). The loader applies them on next app start.
+     */
+    private fun writeStaging(
+        resolver: ContentResolver,
+        target: MirrorTarget,
+        localDataRoot: File,
+        puts: List<String>,
+        deletes: List<String>
+    ) {
+        val stagingRoot = "${target.packageName}/$ROOT_DATA/${WritebackManifest.DIR}"
+        // Clear any previous staging so a stale .ready/payload can't be applied.
+        deleteRemoteEntry(resolver, target.authority, stagingRoot)
+
+        val manifest = WritebackManifest()
+        for (relPath in puts) {
+            val local = File(localDataRoot, relPath)
+            if (!local.isFile) continue
+            writeRemoteFileFromLocal(resolver, target.authority,
+                "$stagingRoot/${WritebackManifest.PAYLOAD}/$relPath", local)
+            manifest.changes.add(WritebackManifest.Change(relPath, WritebackManifest.OP_PUT))
+        }
+        for (relPath in deletes) {
+            manifest.changes.add(WritebackManifest.Change(relPath, WritebackManifest.OP_DELETE))
+        }
+        writeRemoteBytes(resolver, target.authority,
+            "$stagingRoot/${WritebackManifest.MANIFEST}", gson.toJson(manifest).toByteArray())
+        // .ready LAST: the loader only applies a staging that has it.
+        writeRemoteBytes(resolver, target.authority,
+            "$stagingRoot/${WritebackManifest.READY}", ByteArray(0))
     }
 
     private fun copyRemoteToLocal(
@@ -236,56 +289,32 @@ object MirrorSyncManager {
         }
     }
 
-    private fun copyLocalToRemote(
+    private fun writeRemoteFileFromLocal(
         resolver: ContentResolver,
         authority: String,
         documentId: String,
         localFile: File
     ) {
-        ensureRemoteParentDirectory(resolver, authority, documentId)
-        var remoteEntry = queryRemoteEntry(resolver, authority, documentId)
-        if (remoteEntry?.isDirectory == true) {
-            deleteRemoteEntry(resolver, authority, documentId)
-            remoteEntry = null
-        }
-        val targetUri = buildFileUri(authority, documentId)
-        resolver.openFileDescriptor(targetUri, "rwt")?.use { descriptor ->
+        resolver.openFileDescriptor(buildFileUri(authority, documentId), "rwt")?.use { descriptor ->
             localFile.inputStream().use { input ->
                 FileOutputStream(descriptor.fileDescriptor).use { output ->
                     input.copyTo(output)
                 }
             }
-        } ?: throw IllegalStateException("Unable to open remote output ${documentId}")
-        setRemoteLastModified(resolver, targetUri, localFile.lastModified())
+        } ?: throw IllegalStateException("Unable to open remote output $documentId")
     }
 
-    private fun ensureRemoteParentDirectory(
+    private fun writeRemoteBytes(
         resolver: ContentResolver,
         authority: String,
-        documentId: String
+        documentId: String,
+        bytes: ByteArray
     ) {
-        val parentDocumentId = parentDocumentId(documentId) ?: return
-        if (parentDocumentId.contains('/')) {
-            ensureRemoteDirectory(resolver, authority, parentDocumentId)
-        }
-    }
-
-    private fun ensureRemoteDirectory(
-        resolver: ContentResolver,
-        authority: String,
-        documentId: String
-    ): Boolean {
-        val existing = queryRemoteEntry(resolver, authority, documentId)
-        if (existing != null) {
-            return existing.isDirectory
-        }
-        callProvider(
-            resolver,
-            buildDocumentUri(authority, documentId),
-            METHOD_MKDIRS,
-            Bundle().apply { putString(EXTRA_DOCUMENT_ID, documentId) }
-        )
-        return queryRemoteEntry(resolver, authority, documentId)?.isDirectory == true
+        resolver.openFileDescriptor(buildFileUri(authority, documentId), "rwt")?.use { descriptor ->
+            FileOutputStream(descriptor.fileDescriptor).use { output ->
+                output.write(bytes)
+            }
+        } ?: throw IllegalStateException("Unable to open remote output $documentId")
     }
 
     private fun deleteRemoteEntry(
@@ -376,14 +405,6 @@ object MirrorSyncManager {
             .build()
     }
 
-    private fun setRemoteLastModified(resolver: ContentResolver, uri: Uri, time: Long) {
-        val extras = Bundle().apply {
-            putString(EXTRA_DOCUMENT_ID, uri.getQueryParameter(EXTRA_DOCUMENT_ID))
-            putLong(EXTRA_TIME, time)
-        }
-        callProvider(resolver, uri, METHOD_SET_LAST_MODIFIED, extras)
-    }
-
     private fun callProvider(
         resolver: ContentResolver,
         uri: Uri,
@@ -397,30 +418,10 @@ object MirrorSyncManager {
         }
     }
 
-    private fun joinDocumentId(parentDocumentId: String, name: String): String {
-        return if (parentDocumentId.isEmpty()) name else "$parentDocumentId/$name"
-    }
-
-    private fun parentDocumentId(documentId: String): String? {
-        val slash = documentId.lastIndexOf('/')
-        return if (slash >= 0) documentId.substring(0, slash) else null
-    }
-
-    private fun guessMimeType(name: String): String {
-        val lowerName = name.lowercase(Locale.ROOT)
-        return when {
-            lowerName.endsWith(".xml") -> "text/xml"
-            lowerName.endsWith(".json") -> "application/json"
-            lowerName.endsWith(".txt") || lowerName.endsWith(".log") -> "text/plain"
-            else -> "application/octet-stream"
-        }
-    }
-
     private fun getMirrorBaseDir(context: Context): File? {
-        // Mirror into shared internal storage /Android/media/<manager-pkg>/SAF so the data
-        // is browsable with any file manager without the painful SAF / Android/data access
-        // restrictions of scoped storage. externalMediaDirs is the /Android/media path; fall
-        // back to the well-known location when the framework returns nothing.
+        // Mirror into shared internal storage /Android/media/<manager-pkg>/SAF so the data is
+        // browsable with any file manager without scoped-storage restrictions. externalMediaDirs is
+        // the /Android/media path; fall back to the well-known location when it returns nothing.
         val mediaDir = context.externalMediaDirs.firstOrNull(::isUsableDir)
             ?: File("/storage/emulated/0/Android/media/${context.packageName}").takeIf {
                 it.parentFile?.exists() == true || it.mkdirs() || it.exists()
