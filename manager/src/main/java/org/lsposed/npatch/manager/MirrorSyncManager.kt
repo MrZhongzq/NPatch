@@ -175,8 +175,17 @@ object MirrorSyncManager {
         if (!localRootDir.exists()) localRootDir.mkdirs()
 
         val baselineKey = "${target.packageName}__$rootName"
+        // First run for this root (no baseline yet): we have no "previous mirror state" to diff
+        // against, so every existing mirror file would falsely look like a manual addition and be
+        // written back. Instead, treat this round as export-only and just establish the baseline;
+        // manual-change detection starts next round. Also applies after an applied-marker reset.
+        val isFirstRun = !File(baselineDir, "$baselineKey.json").exists()
         val baseline = MirrorBaseline.load(baselineDir, baselineKey)
-        val changeSet = MirrorBaseline.diff(MirrorBaseline.snapshot(localRootDir), baseline)
+        val changeSet = if (isFirstRun) {
+            MirrorBaseline.ChangeSet(emptySet(), emptySet(), emptySet())
+        } else {
+            MirrorBaseline.diff(MirrorBaseline.snapshot(localRootDir), baseline)
+        }
         val remoteFiles = collectRemoteFiles(resolver, target.authority, rootDocumentId)
         val isDataRoot = rootName == ROOT_DATA
 
@@ -195,9 +204,11 @@ object MirrorSyncManager {
                 changeSet.deleted.contains(relPath)
             val remoteEntry = remoteFiles[relPath]
             val localFile = File(localRootDir, relPath)
+            // 3s tolerance absorbs the ext4(ms) vs sdcardfs(second-rounded) mtime gap so we don't
+            // re-export every file each round; a genuine app update moves mtime well past that.
             val remoteChanged = remoteEntry != null &&
                 (!localFile.exists() || localFile.length() != remoteEntry.size ||
-                    remoteEntry.lastModified > localFile.lastModified())
+                    remoteEntry.lastModified > localFile.lastModified() + 3000L)
 
             when (SyncDecision.decide(manuallyChanged, remoteChanged)) {
                 SyncDecision.Action.EXPORT ->
