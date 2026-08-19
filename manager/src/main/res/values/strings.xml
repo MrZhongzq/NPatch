@@ -47,6 +47,10 @@
     <string name="manage_optimize">Optimize</string>
     <string name="manage_optimize_successfully">Optimize successfully</string>
     <string name="manage_optimize_failed">Optimize failed</string>
+    <string name="manage_restore_now">Restore now (apply mirror edits)</string>
+    <string name="manage_restore_need_shizuku">Shizuku required to auto-restart. Reopen the app manually to apply your mirror edits.</string>
+    <string name="manage_restore_triggered">App restarted. Mirror edits will be applied on next start.</string>
+    <string name="manage_restore_failed">Failed to restart the app</string>
     <string name="manage_uninstall_successfully">Uninstall successfully</string>
     <string name="manage_no_modules">No modules yet</string>
     <string name="manage_module_settings">Module settings</string>

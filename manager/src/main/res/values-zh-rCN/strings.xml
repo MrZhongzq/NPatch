@@ -46,6 +46,10 @@
     <string name="manage_optimize">优化</string>
     <string name="manage_optimize_successfully">优化成功</string>
     <string name="manage_optimize_failed">优化失败</string>
+    <string name="manage_restore_now">立即恢复(应用镜像改动)</string>
+    <string name="manage_restore_need_shizuku">需要 Shizuku 才能自动重启;请手动重开应用以应用镜像改动</string>
+    <string name="manage_restore_triggered">已重启应用,将在下次启动时应用镜像改动</string>
+    <string name="manage_restore_failed">重启应用失败</string>
     <string name="manage_uninstall_successfully">卸载成功</string>
     <string name="manage_no_modules">尚无模块</string>
     <string name="manage_module_settings">模块设置</string>

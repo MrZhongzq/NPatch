@@ -1,5 +1,6 @@
 package nkbe.util
 
+import android.app.IActivityManager
 import android.content.IntentSender
 import android.content.pm.*
 import android.os.Build
@@ -30,6 +31,9 @@ object ShizukuApi {
 
     private val iPackageInstaller: IPackageInstaller
         get() = IPackageInstaller.Stub.asInterface(iPackageManager.packageInstaller.asShizukuBinder())
+
+    private val iActivityManager: IActivityManager
+        get() = IActivityManager.Stub.asInterface(getSystemService("activity"))
 
     private val packageInstaller: PackageInstaller
         get() {
@@ -135,5 +139,16 @@ object ShizukuApi {
             SystemProperties.getBoolean("dalvik.vm.usejitprofiles", false),
             "verify", true, true, null
         )
+    }
+
+    /**
+     * Force-stop the target app via IActivityManager (over Shizuku). Used by the mirror "restore
+     * now" action: killing the app makes it restart, and the patch-loader applies the staged
+     * write-back at startup before any database opens. Requires Shizuku ready.
+     */
+    fun forceStopPackage(packageName: String) {
+        ensureReady()
+        val userId = Process.myUserHandle().hashCode()
+        iActivityManager.forceStopPackage(packageName, userId)
     }
 }

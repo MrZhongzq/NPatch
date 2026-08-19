@@ -240,6 +240,19 @@ fun AppManageBody(
             }
         }
     }
+    when (viewModel.restoreState) {
+        is ProcessingState.Idle -> Unit
+        is ProcessingState.Processing -> LoadingDialog()
+        is ProcessingState.Done -> {
+            val done = viewModel.restoreState as ProcessingState.Done
+            val restoreOk = stringResource(R.string.manage_restore_triggered)
+            val restoreFail = stringResource(R.string.manage_restore_failed)
+            LaunchedEffect(Unit) {
+                snackbarHost.showSnackbar(if (done.result) restoreOk else restoreFail)
+                viewModel.dispatch(AppManageViewModel.ViewAction.ClearRestoreResult)
+            }
+        }
+    }
     // 下拉刷新
     SwipeRefresh(
         state = rememberSwipeRefreshState(viewModel.isRefreshing),
@@ -443,6 +456,24 @@ fun AppManageBody(
                                 }
                             }
                         )
+                        if (patchConfig.mirrorMode) {
+                            val restoreNeedShizuku = stringResource(R.string.manage_restore_need_shizuku)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.manage_restore_now)) },
+                                onClick = {
+                                    expanded = false
+                                    scope.launch {
+                                        if (!ShizukuApi.isPermissionGranted) {
+                                            snackbarHost.showSnackbar(restoreNeedShizuku)
+                                        } else {
+                                            viewModel.dispatch(
+                                                AppManageViewModel.ViewAction.RestoreNow(appInfo.app.packageName)
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
                         val uninstallSuccessfully = stringResource(R.string.manage_uninstall_successfully)
                         val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                             if (result.resultCode == Activity.RESULT_OK) {

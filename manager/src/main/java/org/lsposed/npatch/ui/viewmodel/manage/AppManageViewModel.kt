@@ -50,6 +50,10 @@ class AppManageViewModel : ViewModel() {
         object ClearUpdateLoaderResult : ViewAction()
         data class PerformOptimize(val appInfo: AppInfo) : ViewAction()
         object ClearOptimizeResult : ViewAction()
+        // Force-stop a mirror app so the loader applies any pending write-back staging on its next
+        // start (the "restore now" shortcut; otherwise the user just reopens the app themselves).
+        data class RestoreNow(val packageName: String) : ViewAction()
+        object ClearRestoreResult : ViewAction()
         object Refresh : ViewAction()
     }
 
@@ -64,6 +68,9 @@ class AppManageViewModel : ViewModel() {
         private set
 
     var optimizeState: ProcessingState<Boolean> by mutableStateOf(ProcessingState.Idle)
+        private set
+
+    var restoreState: ProcessingState<Boolean> by mutableStateOf(ProcessingState.Idle)
         private set
 
     // Extra guidance shown on the re-patch completion screen's install step.
@@ -154,6 +161,8 @@ class AppManageViewModel : ViewModel() {
                 }
                 is ViewAction.PerformOptimize -> performOptimize(action.appInfo)
                 is ViewAction.ClearOptimizeResult -> optimizeState = ProcessingState.Idle
+                is ViewAction.RestoreNow -> restoreNow(action.packageName)
+                is ViewAction.ClearRestoreResult -> restoreState = ProcessingState.Idle
                 is ViewAction.Refresh -> {
                     if (!isRefreshing) {
                         isRefreshing = true
@@ -166,6 +175,13 @@ class AppManageViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    private suspend fun restoreNow(packageName: String) {
+        val ok = withContext(Dispatchers.IO) {
+            runCatching { ShizukuApi.forceStopPackage(packageName) }.isSuccess
+        }
+        restoreState = ProcessingState.Done(ok)
     }
 
     // silent 参数用于区分是否显示 loading 状态
