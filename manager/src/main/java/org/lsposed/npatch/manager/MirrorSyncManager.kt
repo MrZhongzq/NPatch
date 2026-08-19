@@ -199,25 +199,33 @@ object MirrorSyncManager {
         allPaths.addAll(changeSet.deleted)
 
         for (relPath in allPaths) {
-            val manuallyChanged = changeSet.added.contains(relPath) ||
-                changeSet.modified.contains(relPath) ||
-                changeSet.deleted.contains(relPath)
-            val remoteEntry = remoteFiles[relPath]
-            val localFile = File(localRootDir, relPath)
-            // 3s tolerance absorbs the ext4(ms) vs sdcardfs(second-rounded) mtime gap so we don't
-            // re-export every file each round; a genuine app update moves mtime well past that.
-            val remoteChanged = remoteEntry != null &&
-                (!localFile.exists() || localFile.length() != remoteEntry.size ||
-                    remoteEntry.lastModified > localFile.lastModified() + 3000L)
+            // Per-file isolation: one bad entry must never abort the whole root. QQ caches files
+            // named by URL ('http://qh.qlogo.cn/...?b=qq&ek=...'), whose ':' '?' '&' are illegal on
+            // the sdcardfs mirror -> open EPERM. Without this, that single file aborted the root and
+            // databases/ never synced (and the baseline never got saved). Skip the file, carry on.
+            runCatching {
+                val manuallyChanged = changeSet.added.contains(relPath) ||
+                    changeSet.modified.contains(relPath) ||
+                    changeSet.deleted.contains(relPath)
+                val remoteEntry = remoteFiles[relPath]
+                val localFile = File(localRootDir, relPath)
+                // 3s tolerance absorbs the ext4(ms) vs sdcardfs(second-rounded) mtime gap so we
+                // don't re-export every file each round; a genuine app update moves mtime past that.
+                val remoteChanged = remoteEntry != null &&
+                    (!localFile.exists() || localFile.length() != remoteEntry.size ||
+                        remoteEntry.lastModified > localFile.lastModified() + 3000L)
 
-            when (SyncDecision.decide(manuallyChanged, remoteChanged)) {
-                SyncDecision.Action.EXPORT ->
-                    if (remoteEntry != null) copyRemoteToLocal(resolver, target.authority, remoteEntry, localFile)
-                SyncDecision.Action.WRITEBACK ->
-                    if (isDataRoot) {
-                        if (changeSet.deleted.contains(relPath)) deletes.add(relPath) else puts.add(relPath)
-                    }
-                SyncDecision.Action.SKIP -> {}
+                when (SyncDecision.decide(manuallyChanged, remoteChanged)) {
+                    SyncDecision.Action.EXPORT ->
+                        if (remoteEntry != null) copyRemoteToLocal(resolver, target.authority, remoteEntry, localFile)
+                    SyncDecision.Action.WRITEBACK ->
+                        if (isDataRoot) {
+                            if (changeSet.deleted.contains(relPath)) deletes.add(relPath) else puts.add(relPath)
+                        }
+                    SyncDecision.Action.SKIP -> {}
+                }
+            }.onFailure {
+                Log.d(TAG, "Skip mirror entry $rootName/$relPath (${it.message})")
             }
         }
 
