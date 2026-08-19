@@ -1,7 +1,5 @@
 package nkbe.util
 
-import android.app.ActivityManager
-import android.app.IActivityManager
 import android.content.IntentSender
 import android.content.pm.*
 import android.os.Build
@@ -32,9 +30,6 @@ object ShizukuApi {
 
     private val iPackageInstaller: IPackageInstaller
         get() = IPackageInstaller.Stub.asInterface(iPackageManager.packageInstaller.asShizukuBinder())
-
-    private val iActivityManager: IActivityManager
-        get() = IActivityManager.Stub.asInterface(getSystemService("activity"))
 
     private val packageInstaller: PackageInstaller
         get() {
@@ -140,33 +135,5 @@ object ShizukuApi {
             SystemProperties.getBoolean("dalvik.vm.usejitprofiles", false),
             "verify", true, true, null
         )
-    }
-
-    /**
-     * Packages that currently have a running process. Queried via IActivityManager over Shizuku
-     * (shell privilege sees all processes) — NOT by touching the target's ContentProvider, which
-     * would start the app and defeat the point. Empty set when Shizuku is unavailable.
-     */
-    fun getRunningPackages(): Set<String> {
-        ensureReady()
-        val result = HashSet<String>()
-        val procs: List<ActivityManager.RunningAppProcessInfo>? = iActivityManager.runningAppProcesses
-        if (procs != null) {
-            for (p in procs) {
-                p.pkgList?.let { result.addAll(it.asList()) }
-            }
-        }
-        return result
-    }
-
-    fun isPackageRunning(packageName: String): Boolean {
-        return runCatching { getRunningPackages().contains(packageName) }.getOrDefault(false)
-    }
-
-    /** Force-stop the target app so the loader re-applies a pending write-back staging on next start. */
-    fun forceStopPackage(packageName: String) {
-        ensureReady()
-        val userId = Process.myUserHandle().hashCode()
-        iActivityManager.forceStopPackage(packageName, userId)
     }
 }

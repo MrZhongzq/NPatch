@@ -227,14 +227,25 @@ object MirrorSyncManager {
         rootDocumentId: String
     ): Map<String, RemoteEntry> {
         val out = HashMap<String, RemoteEntry>()
-        fun recurse(documentId: String, prefix: String) {
-            for (child in listRemoteChildren(resolver, authority, documentId)) {
-                val rel = if (prefix.isEmpty()) child.displayName else "$prefix/${child.displayName}"
-                if (child.isDirectory) recurse(child.documentId, rel) else out[rel] = child
+        collectRemoteFilesInto(resolver, authority, rootDocumentId, "", out)
+        return out
+    }
+
+    private fun collectRemoteFilesInto(
+        resolver: ContentResolver,
+        authority: String,
+        documentId: String,
+        prefix: String,
+        out: HashMap<String, RemoteEntry>
+    ) {
+        for (child in listRemoteChildren(resolver, authority, documentId)) {
+            val rel = if (prefix.isEmpty()) child.displayName else "$prefix/${child.displayName}"
+            if (child.isDirectory) {
+                collectRemoteFilesInto(resolver, authority, child.documentId, rel, out)
+            } else {
+                out[rel] = child
             }
         }
-        recurse(rootDocumentId, "")
-        return out
     }
 
     /**
