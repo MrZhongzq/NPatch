@@ -33,23 +33,25 @@ manager 缓存上轮目录结构，只对 mtime 变化的目录 re-query。但�
 - `openFile` 对 `content://<auth>/manifest?id=<rootDocumentId>`：
   1. `resolveDocumentFile(rootDocumentId, requireExists=true)` 得到 root 目录（复用现有安全校验：canonical under root）。
   2. `ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe()`。
-  3. 后台线程：`AutoCloseOutputStream(pipe[1])` 写清单——迭代式（显式栈，非递归，避免深目录栈溢出）遍历 root 下所有普通文件，每行输出 `size + '\t' + mtime + '\t' + 相对路径(相对 root，'/' 分隔) + '\n'`（UTF-8）；出错/结束都 close 写端。
+  3. 后台线程：`AutoCloseOutputStream(pipe[1])` 写清单——迭代式（显式栈，非递归，避免深目录栈溢出）遍历 root 子树，每行 `type + '\t' + size + '\t' + mtime + '\t' + 相对路径(相对 root，'/' 分隔) + '\n'`（UTF-8），`type` = `'f'`(文件) / `'d'`(目录)；出错/结束都 close 写端。
   4. 返回 `pipe[0]`（读端）。
-- 只列**普通文件**（跳过目录/符号链接指向目录），与现有 `collectRemoteFiles` 语义一致。
-- 相对路径以 root 为基准；`size`/`mtime` = `File.length()`/`File.lastModified()`，与 `MirrorBaseline.FileSig` 对齐。
+- **同时列文件和目录（含空目录）**（决策 3）：镜像需反映完整目录结构，用户才能进入原本空的目录放 `.nomedia` 等。目录条目 `size=0`、`mtime=dir.lastModified()`。
+- 相对路径以 root 为基准；文件 `size`/`mtime` = `File.length()`/`File.lastModified()`，与 `MirrorBaseline.FileSig` 对齐。
 
 ### 组件 ② manager 消费（MirrorSyncManager）
-- 新增 `readRemoteManifest(resolver, authority, rootDocumentId): Map<String, RemoteEntry>?`
-  - `resolver.openFileDescriptor(manifestUri, "r")` → `BufferedReader` 逐行 → 解析 `size\tmtime\t路径`（`split('\t', limit=3)`，路径取第 3 段，容纳路径里的其它字符）→ `RemoteEntry(documentId=rootDocumentId+"/"+path, displayName=basename, mimeType=推断或占位, lastModified, size)`。
+- 新增 `readRemoteManifest(resolver, authority, rootDocumentId): RemoteListing?`，其中 `RemoteListing(files: Map<String, RemoteEntry>, dirs: List<String>)`。
+  - `resolver.openFileDescriptor(manifestUri, "r")` → `BufferedReader` 逐行 → 解析 `type\tsize\tmtime\t路径`（`split('\t', limit=4)`，路径取第 4 段以容纳路径里的其它字符）→ `type=='d'` 入 `dirs`，否则 `files[path]=RemoteEntry(documentId=rootDocumentId+"/"+path, ..., size, lastModified)`。
   - 返回 null 表示"清单不可用"（旧 provider 无此 PATH / 打开失败）。
-- `syncRoot`（`:197`）改：`val remoteFiles = readRemoteManifest(...) ?: collectRemoteFiles(...)`。**保留 `collectRemoteFiles` 作 fallback**。
+- `syncRoot`（`:197`）改：先取 listing = `readRemoteManifest(...)`；`remoteFiles = listing?.files ?: collectRemoteFiles(...)`（**保留 `collectRemoteFiles` 作 fallback**）。
+- **空目录同步**（决策 3）：拿到 `listing.dirs` 后，对每个目录 `File(localRootDir, dir).mkdirs()`，确保镜像反映完整目录结构（含空目录）。仅新建，不删（与"导出不做删除跟随"一致）。fallback 路径（旧递归）无目录信息，保持现状（不同步空目录）——旧 app 少此能力可接受。
 
 ### 组件 ③ 兼容性（关键）
 未重补的旧 patched app 的 provider **没有** manifest PATH → `openFileDescriptor` 抛 `FileNotFoundException` → `readRemoteManifest` 返回 null → 自动 fallback 到旧递归。**旧 app 不受影响，无需强制重补**。
 
 ### 清单格式细节
-- 分隔：字段用 `\t`，行用 `\n`。文件名理论可含 `\t`/`\n`（极罕见）；MVP 约定跳过名字含 `\t`/`\n` 的文件（provider 侧过滤 + 记数），因其在 sdcardfs 镜像上本就多半非法（已被 per-file 容错跳过）。后续如需可改 `\0` 分隔或 length-prefixed。
-- `RemoteEntry.mimeType`：清单不传 mime；`readRemoteManifest` 构造时按扩展名推断或填 `application/octet-stream`（mirror 逻辑只用 size/mtime/isDirectory；清单只含文件，isDirectory 恒 false，不影响）。
+- 每行 4 字段：`type\tsize\tmtime\t相对路径`，`type`∈{`f`,`d`}。字段用 `\t`，行用 `\n`。
+- 文件名理论可含 `\t`/`\n`（极罕见）；MVP 约定 provider 侧跳过名字含 `\t`/`\n` 的条目（+记数），因其在 sdcardfs 镜像上本就多半非法（已被 per-file 容错跳过）。后续如需可改 `\0` 分隔或 length-prefixed。
+- `RemoteEntry.mimeType`：清单不传 mime；`readRemoteManifest` 构造 `files` 里的条目时按扩展名推断或填 `application/octet-stream`（mirror 逻辑只用 size/mtime；files 里 isDirectory 恒 false，不影响）。
 
 ## 已知取舍
 - **每轮仍拿全量清单**（不做跨轮增量缓存）。因为清单生成在 app 进程本地 File 遍历（快）+ 1 次流式传输，整轮已足够快，增量缓存的复杂度不值得。
@@ -58,16 +60,18 @@ manager 缓存上轮目录结构，只对 mtime 变化的目录 re-query。但�
 
 ## 测试
 - **JVM 单测**：
-  - provider 遍历→清单格式（把遍历+格式化逻辑抽成纯静态方法 `buildManifest(File root): 逐行`，临时目录测：嵌套文件、size/mtime、相对路径、跳过目录、跳过含 `\t\n` 名）。
-  - manager `parseManifestLine` / `readRemoteManifest` 解析（纯函数，测含特殊字符路径、畸形行容错）。
-- **真机（用户回来后）**：QQ 一轮耗时对比（优化前几十秒~几分钟 → 优化后目标数秒内）；基线建立后功能不变（回写/恢复链路仍正常）。
+  - provider 遍历→清单格式（把遍历+格式化逻辑抽成纯静态方法 `buildManifest(File root, Appendable out)`，临时目录测：嵌套文件、**空目录出 `d` 行**、size/mtime、相对路径、跳过含 `\t\n` 名）。
+  - manager `parseManifestLine` / `readRemoteManifest` 解析（纯函数，测 f/d 分流、含特殊字符路径、畸形行容错）。
+- **真机（用户接手机后）**：QQ 一轮耗时对比（优化前几十秒~几分钟 → 优化后目标数秒内）；基线建立后功能不变（回写/恢复链路仍正常）；镜像出现空目录、在其中放 `.nomedia` 能回写。
 
 ## 涉及文件
 - `meta-loader/.../NPatchDataProvider.java`：加 PATH_MANIFEST + openFile 分支 + `buildManifest`（静态，可测）。
 - `manager/.../MirrorSyncManager.kt`：加 `readRemoteManifest`/`parseManifestLine`，`syncRoot` 接入 + fallback。
 - 新单测：manager + meta-loader 的 `src/test/java`（沿用独立 JVM javac+junit 跑法，脚本 `scratchpad/jt.sh`）。
 
-## 决策点（待 user review）
-1. **方案 A** 认可？（vs 增量缓存 B）
-2. 是否**叠加 C** 排除 `cache/` 等大目录——减小清单/导出量，但 cache 不进备份镜像。（倾向不排除：清单快了就不必牺牲完整性；若你更看重速度/空间可开）
-3. 清单**只列文件**、不含空目录——可接受？（mirror 现也不同步空目录）
+## 决策（2026-08-19 user 已定）
+1. **方案 A**（深度清单+流式）✅
+2. **不排除任何目录**（cache 等也备份，保完整）✅
+3. **同步空目录** ✅ — 用户需在原本空的目录里放 `.nomedia` 等，故清单含 `d` 条目、导出 mkdir 空目录。
+
+**状态**: 已批准，进入 writing-plans。
