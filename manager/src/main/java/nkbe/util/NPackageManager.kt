@@ -21,6 +21,7 @@ import androidx.documentfile.provider.DocumentFile
 import dev.rikka.tools.refine.Refine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.parcelize.Parcelize
 import me.zhanghai.android.appiconloader.AppIconLoader
 import org.lsposed.npatch.config.ConfigManager
@@ -118,7 +119,12 @@ object NPackageManager {
 
                 if (isShizukuAvailable) {
                     var flags = Refine.unsafeCast<SessionParamsHidden>(params).installFlags
-                    flags = flags or PackageManagerHidden.INSTALL_ALLOW_TEST or PackageManagerHidden.INSTALL_REPLACE_EXISTING
+                    flags = flags or PackageManagerHidden.INSTALL_ALLOW_TEST or
+                        PackageManagerHidden.INSTALL_REPLACE_EXISTING or
+                        0x00000080 or // INSTALL_ALLOW_DOWNGRADE
+                        0x00080000 or // INSTALL_SKIP_VERIFICATION: skip Play Protect scan that can stall/fail large-apk installs
+                        0x01000000    // INSTALL_BYPASS_LOW_TARGET_SDK_BLOCK: actually install low-targetSdk patches on Android 14+
+                    // NOTE: deliberately NOT setting INSTALL_ALL_USERS (0x40) — install for the current user only.
                     Refine.unsafeCast<SessionParamsHidden>(params).installFlags = flags
                 }
 
@@ -149,16 +155,24 @@ object NPackageManager {
                     }
 
                     var resultIntent: Intent? = null
-                    suspendCoroutine { cont ->
-                        val adapter = IntentSenderHelper.IIntentSenderAdaptor { intent ->
-                            resultIntent = intent
-                            cont.resume(Unit)
+                    // 30s timeout: the system PackageInstaller can hang indefinitely on some ROMs;
+                    // without this the coroutine (and the UI awaiting it) freezes forever.
+                    val committed = withTimeoutOrNull(30_000L) {
+                        suspendCoroutine { cont ->
+                            val adapter = IntentSenderHelper.IIntentSenderAdaptor { intent ->
+                                resultIntent = intent
+                                cont.resume(Unit)
+                            }
+                            val intentSender = IntentSenderHelper.newIntentSender(adapter)
+                            s.commit(intentSender)
                         }
-                        val intentSender = IntentSenderHelper.newIntentSender(adapter)
-                        s.commit(intentSender)
                     }
 
-                    resultIntent?.let { intent ->
+                    if (committed == null) {
+                        status = PackageInstaller.STATUS_FAILURE
+                        message = "Install timed out after 30s (system installer did not respond)"
+                        Log.e(TAG, "Install commit timed out")
+                    } else resultIntent?.let { intent ->
                         status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
                         message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
 
@@ -264,7 +278,15 @@ object NPackageManager {
         try {
             java.util.zip.ZipFile(bundle).use { zip ->
                 zip.entries().asSequence()
-                    .filter { !it.isDirectory && it.name.lowercase().endsWith(".apk") }
+                    .filter { entry ->
+                        if (entry.isDirectory || !entry.name.lowercase().endsWith(".apk")) return@filter false
+                        // Skip APKs embedded under assets/res/lib/META-INF (e.g. a patched app's own
+                        // origin.apk) that would otherwise be misdetected as split APKs; real split
+                        // APKs live at the bundle root.
+                        val n = entry.name.lowercase()
+                        !n.startsWith("assets/") && !n.startsWith("res/") &&
+                            !n.startsWith("lib/") && !n.startsWith("meta-inf/")
+                    }
                     .forEach { entry ->
                         val name = entry.name.substringAfterLast('/')
                         val dst = lspApp.tmpApkDir.resolve(name)
