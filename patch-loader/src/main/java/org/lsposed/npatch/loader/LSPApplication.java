@@ -191,7 +191,13 @@ public class LSPApplication {
 
             stubLoadedApk = (LoadedApk) XposedHelpers.getObjectField(mBoundApplication, "info");
             var appInfo = (ApplicationInfo) XposedHelpers.getObjectField(mBoundApplication, "appInfo");
-            var compatInfo = (CompatibilityInfo) XposedHelpers.getObjectField(mBoundApplication, "compatInfo");
+            // API 36 (Android 16) may block this reflective hidden field; tolerate null and let the
+            // system fall back to a default CompatibilityInfo instead of aborting the whole loader.
+            CompatibilityInfo compatInfo = null;
+            try {
+                compatInfo = (CompatibilityInfo) XposedHelpers.getObjectField(mBoundApplication, "compatInfo");
+            } catch (Throwable ignored) {
+            }
             var baseClassLoader = stubLoadedApk.getClassLoader();
 
             try (var is = baseClassLoader.getResourceAsStream(CONFIG_ASSET_PATH)) {

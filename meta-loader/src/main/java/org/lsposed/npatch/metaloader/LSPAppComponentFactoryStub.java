@@ -47,6 +47,17 @@ public class LSPAppComponentFactoryStub extends AppComponentFactory {
 
     private static void bootstrap() {
         try {
+            // Globally exempt hidden-API access for the whole patched-app process (Android P+), set
+            // once at the earliest entry point. The loader reflects into ActivityThread/LoadedApk
+            // internals; on Android 16 (API 36) the hidden-API restrictions tightened and would
+            // otherwise block that. Process-wide, so LSPApplication doesn't need its own exemption.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                try {
+                    HiddenApiBypass.addHiddenApiExemptions("");
+                } catch (Throwable t) {
+                    Log.w(TAG, "Failed to add hidden api exemptions", t);
+                }
+            }
             archToLib.put("arm64", "arm64-v8a");
             archToLib.put("x86_64", "x86_64");
 
