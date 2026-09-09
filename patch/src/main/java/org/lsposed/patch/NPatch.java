@@ -193,7 +193,9 @@ public class NPatch {
             String apkFileName = srcApkFile.getName();
 
             File outputFile = new File(outputDir, String.format(
-                    Locale.getDefault(), "%s-%d-npatched.apk",
+                    // Locale.ROOT: non-ASCII-digit locales (Arabic/Persian) would otherwise emit
+                    // the version code with non-ASCII digits, producing an odd/illegal filename.
+                    Locale.ROOT, "%s-%d-npatched.apk",
                     FilenameUtils.getBaseName(apkFileName),
                     LSPConfig.instance.VERSION_CODE)
             ).getAbsoluteFile();
@@ -213,6 +215,27 @@ public class NPatch {
         }
     }
 
+    /**
+     * Read the original apk's minSdkVersion from its manifest (21 fallback). Signing with the real
+     * minSdk lets apksig emit the correct scheme set — notably a v1 (JAR) signature when minSdk<24,
+     * which a hardcoded minSdk=27 would drop, making the patched apk uninstallable on Android 5-6.
+     */
+    private int readMinSdk(ZFile srcZFile) {
+        try {
+            var manifestEntry = srcZFile.get(ANDROID_MANIFEST_XML);
+            if (manifestEntry != null) {
+                try (var is = manifestEntry.open()) {
+                    ManifestParser.Pair p = ManifestParser.parseManifestFile(is);
+                    if (p != null && p.minSdkVersion > 0) {
+                        return p.minSdkVersion;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return 21;
+    }
+
     private void resignSplitApk(File srcApkFile, File outputFile) throws PatchError {
         try (ZFile dstZFile = ZFile.openReadWrite(outputFile, Z_FILE_OPTIONS);
              ZFile srcZFile = ZFile.openReadOnly(srcApkFile)) {
@@ -230,8 +253,10 @@ public class NPatch {
                     keystoreArgs.get(2),
                     new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
             new SigningExtension(SigningOptions.builder()
-                    .setMinSdkVersion(27)
+                    .setMinSdkVersion(readMinSdk(srcZFile))
+                    .setV1SigningEnabled(true)
                     .setV2SigningEnabled(true)
+                    .setV3SigningEnabled(true)
                     .setCertificates((X509Certificate[]) entry.getCertificateChain())
                     .setKey(entry.getPrivateKey())
                     .build()).register(dstZFile);
@@ -293,8 +318,10 @@ public class NPatch {
                 }
                 var entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(keystoreArgs.get(2), new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
                 new SigningExtension(SigningOptions.builder()
-                        .setMinSdkVersion(27)
+                        .setMinSdkVersion(readMinSdk(srcZFile))
+                        .setV1SigningEnabled(true)
                         .setV2SigningEnabled(true)
+                        .setV3SigningEnabled(true)
                         .setCertificates((X509Certificate[]) entry.getCertificateChain())
                         .setKey(entry.getPrivateKey())
                         .build()).register(dstZFile);
