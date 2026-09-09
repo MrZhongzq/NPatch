@@ -113,6 +113,12 @@ public class NPatch {
     @Parameter(names = {"-r", "--allowdown"}, description = "Allow downgrade installation by overriding versionCode to 1 (In most cases, the app can still get the correct versionCode)")
     private boolean overrideVersionCode = false;
 
+    @Parameter(names = {"--override-target-sdk"}, description = "Override the app's targetSdkVersion in the manifest (improves compatibility of Xposed modules relying on legacy Android behaviours)")
+    private boolean overrideTargetSdk = false;
+
+    @Parameter(names = {"--target-sdk"}, description = "Custom targetSdkVersion value used when --override-target-sdk is set (default 28)")
+    private int overrideTargetSdkValue = 28;
+
     @Parameter(names = {"-v", "--verbose"}, description = "Verbose output")
     private boolean verbose = false;
 
@@ -670,6 +676,9 @@ public class NPatch {
             property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, minSdkVersion));
         else
             property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.MIN_SDK_VERSION, 27));
+        if (overrideTargetSdk) {
+            property.addUsesSdkAttribute(new AttributeItem(NodeValue.UsesSDK.TARGET_SDK_VERSION, overrideTargetSdkValue));
+        }
         property.addApplicationAttribute(new AttributeItem(NodeValue.Application.DEBUGGABLE, debuggableFlag));
         property.addApplicationAttribute(new AttributeItem("appComponentFactory", PROXY_APP_COMPONENT_FACTORY));
         // Disable split requirement (in case of merged split APKs)

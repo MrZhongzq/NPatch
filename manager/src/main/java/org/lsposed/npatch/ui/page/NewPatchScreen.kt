@@ -429,6 +429,13 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             title = stringResource(R.string.patch_use_npatch_gms),
             desc = stringResource(R.string.patch_use_npatch_gms_desc)
         )
+        SettingsCheckBox(
+            modifier = Modifier.clickable { viewModel.overrideTargetSdk = !viewModel.overrideTargetSdk },
+            checked = viewModel.overrideTargetSdk,
+            icon = Icons.Outlined.Layers,
+            title = stringResource(R.string.patch_override_target_sdk),
+            desc = stringResource(R.string.patch_override_target_sdk_desc)
+        )
         var bypassExpanded by remember { mutableStateOf(false) }
         AnywhereDropdown(
             expanded = bypassExpanded,

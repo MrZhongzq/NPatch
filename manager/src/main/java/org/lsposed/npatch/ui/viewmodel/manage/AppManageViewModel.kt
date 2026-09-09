@@ -136,7 +136,8 @@ class AppManageViewModel : ViewModel() {
                     val lv3 = PatchConfig(
                         c.useManager, c.debuggable, c.overrideVersionCode, 3,
                         c.originalSignature, c.appComponentFactory, c.injectProvider,
-                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms
+                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms,
+                        c.overrideTargetSdk, c.overrideTargetSdkValue
                     )
                     updateLoader(action.appInfo, lv3)
                 }
@@ -149,7 +150,8 @@ class AppManageViewModel : ViewModel() {
                     val converted = PatchConfig(
                         toManager, c.debuggable, c.overrideVersionCode, c.sigBypassLevel,
                         c.originalSignature, c.appComponentFactory, c.injectProvider,
-                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms
+                        c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms,
+                        c.overrideTargetSdk, c.overrideTargetSdkValue
                     )
                     updateLoader(action.appInfo, converted, dropEmbeddedModules = toManager)
                 }

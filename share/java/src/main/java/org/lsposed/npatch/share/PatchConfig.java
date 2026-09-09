@@ -16,6 +16,8 @@ public class PatchConfig {
     public final String newPackage;
     public final String installerSource;
     public final boolean useNPatchGms;
+    public final boolean overrideTargetSdk;
+    public final int overrideTargetSdkValue;
 
     public PatchConfig(
             boolean useManager,
@@ -29,7 +31,9 @@ public class PatchConfig {
             boolean outputLog,
             String newPackage,
             String installerSource,
-            boolean useNPatchGms
+            boolean useNPatchGms,
+            boolean overrideTargetSdk,
+            int overrideTargetSdkValue
     ) {
         this.useManager = useManager;
         this.debuggable = debuggable;
@@ -45,5 +49,7 @@ public class PatchConfig {
         this.outputLog = outputLog;
         this.installerSource = installerSource;
         this.useNPatchGms = useNPatchGms;
+        this.overrideTargetSdk = overrideTargetSdk;
+        this.overrideTargetSdkValue = overrideTargetSdkValue;
     }
 }

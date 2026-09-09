@@ -32,6 +32,10 @@ object Patcher {
                 add("-l"); add(config.sigBypassLevel.toString())
                 if (config.useManager) add("--manager")
                 if (config.overrideVersionCode) add("-r")
+                if (config.overrideTargetSdk) {
+                    add("--override-target-sdk")
+                    add("--target-sdk"); add(config.overrideTargetSdkValue.toString())
+                }
                 if (Configs.detailPatchLogs) add("-v")
                 embeddedModules?.forEach {
                     add("-m"); add(it)

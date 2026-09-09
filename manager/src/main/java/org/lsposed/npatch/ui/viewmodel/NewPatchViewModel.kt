@@ -50,6 +50,8 @@ class NewPatchViewModel : ViewModel() {
     var mirrorMode by mutableStateOf(false)
     var outputLog by mutableStateOf(true)
     var useNPatchGms by mutableStateOf(false)
+    var overrideTargetSdk by mutableStateOf(false)
+    var overrideTargetSdkValue by mutableStateOf("28")
     var embeddedModules = emptyList<AppInfo>()
 
     lateinit var patchApp: AppInfo
@@ -103,7 +105,7 @@ class NewPatchViewModel : ViewModel() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
         val installerSource = getInstallerSource(patchApp.app.packageName)
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms)
+        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue.toIntOrNull()?.takeIf { it > 0 } ?: 28)
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,
