@@ -35,7 +35,7 @@ class ConfigProvider : ContentProvider() {
                 org.lsposed.npatch.share.SelfStartDefaults.COL_MASTER,
                 org.lsposed.npatch.share.SelfStartDefaults.COL_DISABLED
             ))
-            c.addRow(arrayOf(
+            c.addRow(arrayOf<Any?>(
                 if (cfg.master) 1 else 0,
                 cfg.disabled.joinToString(org.lsposed.npatch.share.SelfStartDefaults.DISABLED_SEP)
             ))
