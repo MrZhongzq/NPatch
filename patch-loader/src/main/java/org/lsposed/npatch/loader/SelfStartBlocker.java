@@ -64,6 +64,7 @@ public final class SelfStartBlocker {
             registerForegroundTracker(context);
             if (needReceiver) hookHandleReceiver();
             if (needJob) hookJobService(context);
+            if (needService) hookServices(context);
             Log.i(TAG, "Self-start active: receiver=" + needReceiver
                     + " jobs=" + needJob + " services=" + disabledServices.size());
         } catch (Throwable t) {
@@ -244,6 +245,48 @@ public final class SelfStartBlocker {
         } catch (Throwable t) {
             Log.w(TAG, "hookJobService failed (fail-open)", t);
         }
+    }
+
+    private static void hookServices(Context context) {
+        ClassLoader cl = context.getClassLoader();
+        for (String cls : disabledServices) {
+            try {
+                Class<?> svc = Class.forName(cls, false, cl);
+                // onStartCommand: 后台命中 → 返回 START_NOT_STICKY 且跳过原始体
+                XposedBridge.hookAllMethods(svc, "onStartCommand", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            if (SelfStartDecision.shouldSkipService(cls, disabledServices, resumedCount.get() > 0)) {
+                                Log.i(TAG, "[SelfStart] SVC-SKIP onStartCommand " + cls);
+                                param.setResult(android.app.Service.START_NOT_STICKY);
+                            }
+                        } catch (Throwable t) {
+                            Log.w(TAG, "onStartCommand hook error (fail-open)", t);
+                        }
+                    }
+                });
+                // onCreate: 后台命中 → 跳过原始体(避免其后台初始化干活)
+                XposedBridge.hookAllMethods(svc, "onCreate", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            if (SelfStartDecision.shouldSkipService(cls, disabledServices, resumedCount.get() > 0)) {
+                                Log.i(TAG, "[SelfStart] SVC-SKIP onCreate " + cls);
+                                param.setResult(null);
+                            }
+                        } catch (Throwable t) {
+                            Log.w(TAG, "onCreate hook error (fail-open)", t);
+                        }
+                    }
+                });
+            } catch (ClassNotFoundException e) {
+                Log.i(TAG, "Service class not found, skip: " + cls);
+            } catch (Throwable t) {
+                Log.w(TAG, "hookServices failed for " + cls + " (fail-open)", t);
+            }
+        }
+        Log.i(TAG, "Service suppression hooks installed for " + disabledServices.size() + " classes");
     }
 
     /** ReceiverData.info is the receiver's ActivityInfo; its name is the receiver class. */
