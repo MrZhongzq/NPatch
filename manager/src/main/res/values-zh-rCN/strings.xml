@@ -122,4 +122,12 @@
     <string name="settings_keystore_wrong_alias_password">别名密码错误</string>
     <string name="settings_detail_patch_logs">详细修补日志</string>
     <string name="settings_storage_directory">变更存储目录</string>
+
+    <!-- Self-start Management -->
+    <string name="screen_self_start">自启动</string>
+    <string name="self_start_master">管理此应用的自启动</string>
+    <string name="self_start_master_desc">开启后,下方被关闭的 receiver 会在应用下次启动时被拦截。改动无需重新修补。</string>
+    <string name="self_start_receivers">广播接收器</string>
+    <string name="self_start_autostart_tag">自启</string>
+    <string name="self_start_empty">没有已修补的应用</string>
 </resources>
