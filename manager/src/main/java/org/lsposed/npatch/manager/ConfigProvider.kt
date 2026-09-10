@@ -33,11 +33,15 @@ class ConfigProvider : ContentProvider() {
             val cfg = SelfStartConfigStore.get(ctx, targetPackage)
             val c = MatrixCursor(arrayOf(
                 org.lsposed.npatch.share.SelfStartDefaults.COL_MASTER,
-                org.lsposed.npatch.share.SelfStartDefaults.COL_DISABLED
+                org.lsposed.npatch.share.SelfStartDefaults.COL_DISABLED,
+                org.lsposed.npatch.share.SelfStartDefaults.COL_JOBS,
+                org.lsposed.npatch.share.SelfStartDefaults.COL_DISABLED_SERVICES
             ))
             c.addRow(arrayOf<Any?>(
                 if (cfg.master) 1 else 0,
-                cfg.disabled.joinToString(org.lsposed.npatch.share.SelfStartDefaults.DISABLED_SEP)
+                cfg.disabled.joinToString(org.lsposed.npatch.share.SelfStartDefaults.DISABLED_SEP),
+                if (cfg.suppressJobs) 1 else 0,
+                cfg.disabledServices.joinToString(org.lsposed.npatch.share.SelfStartDefaults.DISABLED_SEP)
             ))
             return c
         }
