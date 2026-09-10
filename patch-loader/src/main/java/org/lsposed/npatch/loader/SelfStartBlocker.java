@@ -144,6 +144,9 @@ public final class SelfStartBlocker {
         return new File(context.getCacheDir(), CACHE_FILE);
     }
 
+    // NOTE: this on-disk cache JSON (key "services") is independent of SelfStartConfigStore's
+    // persisted JSON (key "disabledServices") — the two are never cross-read, so the differing
+    // key names are intentional, not a bug.
     private static void writeCache(Context context, AppCfg cfg) {
         try {
             org.json.JSONObject o = new org.json.JSONObject();
@@ -247,6 +250,14 @@ public final class SelfStartBlocker {
         }
     }
 
+    /**
+     * Only onStartCommand is hooked (no onCreate hook). Neutering onCreate when backgrounded would
+     * leave the Service instance CONSTRUCTED BUT UNINITIALIZED (fields never set); if a later
+     * onStartCommand then runs for real (e.g. app comes to foreground and the foreground bypass lets
+     * it through) against that half-initialized instance, it NPEs inside the target app's own code —
+     * a crash our fail-open try/catch here cannot catch, since it happens outside this hook. Skipping
+     * onStartCommand alone is sufficient to suppress the work and carries no such hazard.
+     */
     private static void hookServices(Context context) {
         ClassLoader cl = context.getClassLoader();
         for (String cls : disabledServices) {
@@ -263,20 +274,6 @@ public final class SelfStartBlocker {
                             }
                         } catch (Throwable t) {
                             Log.w(TAG, "onStartCommand hook error (fail-open)", t);
-                        }
-                    }
-                });
-                // onCreate: 后台命中 → 跳过原始体(避免其后台初始化干活)
-                XposedBridge.hookAllMethods(svc, "onCreate", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        try {
-                            if (SelfStartDecision.shouldSkipService(cls, disabledServices, resumedCount.get() > 0)) {
-                                Log.i(TAG, "[SelfStart] SVC-SKIP onCreate " + cls);
-                                param.setResult(null);
-                            }
-                        } catch (Throwable t) {
-                            Log.w(TAG, "onCreate hook error (fail-open)", t);
                         }
                     }
                 });
