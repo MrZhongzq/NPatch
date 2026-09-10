@@ -28,6 +28,20 @@ class ConfigProvider : ContentProvider() {
         val targetPackage = uri.getQueryParameter("package")
         if (targetPackage.isNullOrEmpty()) return null
 
+        if (uri.getQueryParameter("type") == org.lsposed.npatch.share.SelfStartDefaults.SELFSTART_QUERY_TYPE) {
+            val ctx = context ?: return null
+            val cfg = SelfStartConfigStore.get(ctx, targetPackage)
+            val c = MatrixCursor(arrayOf(
+                org.lsposed.npatch.share.SelfStartDefaults.COL_MASTER,
+                org.lsposed.npatch.share.SelfStartDefaults.COL_DISABLED
+            ))
+            c.addRow(arrayOf(
+                if (cfg.master) 1 else 0,
+                cfg.disabled.joinToString(org.lsposed.npatch.share.SelfStartDefaults.DISABLED_SEP)
+            ))
+            return c
+        }
+
         val modulesList = runBlocking {
             try {
                 // 修正：直接使用 ConfigManager 來獲取該 APP 啟用的模組列表
