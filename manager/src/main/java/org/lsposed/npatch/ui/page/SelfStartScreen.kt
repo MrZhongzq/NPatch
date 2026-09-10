@@ -35,10 +35,12 @@ fun SelfStartScreen(navigator: DestinationsNavigator) {
         NPackageManager.fetchAppList()
     }
 
+    val patchedAppList = NPackageManager.appList.filter { NPackageManager.isNPatchPatched(it) }
+
     Scaffold(
         topBar = { CenterTopBar(stringResource(BottomBarDestination.SelfStart.label)) }
     ) { innerPadding ->
-        if (NPackageManager.appList.isEmpty()) {
+        if (patchedAppList.isEmpty()) {
             Box(
                 Modifier
                     .padding(innerPadding)
@@ -58,7 +60,7 @@ fun SelfStartScreen(navigator: DestinationsNavigator) {
                     .fillMaxSize()
             ) {
                 items(
-                    items = NPackageManager.appList,
+                    items = patchedAppList,
                     key = { it.app.packageName }
                 ) { info ->
                     AppItem(

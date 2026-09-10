@@ -10,13 +10,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -29,8 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import org.lsposed.npatch.R
-import org.lsposed.npatch.ui.component.CenterTopBar
 import org.lsposed.npatch.ui.component.settings.SettingsCheckBox
 import org.lsposed.npatch.ui.viewmodel.SelfStartAppViewModel
 
@@ -41,7 +45,7 @@ private val AUTO_START_ACCENT = Color(0xFF7E57C2)
 @OptIn(ExperimentalMaterial3Api::class)
 @Destination
 @Composable
-fun SelfStartAppScreen(packageName: String) {
+fun SelfStartAppScreen(packageName: String, navigator: DestinationsNavigator) {
     val vm: SelfStartAppViewModel = viewModel()
     val ctx = LocalContext.current
 
@@ -50,7 +54,7 @@ fun SelfStartAppScreen(packageName: String) {
     }
 
     Scaffold(
-        topBar = { CenterTopBar(packageName) }
+        topBar = { SelfStartAppTopBar(packageName) { navigator.navigateUp() } }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -85,6 +89,20 @@ fun SelfStartAppScreen(packageName: String) {
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelfStartAppTopBar(packageName: String, onBackClick: () -> Unit) {
+    TopAppBar(
+        title = { Text(packageName) },
+        navigationIcon = {
+            IconButton(
+                onClick = onBackClick,
+                content = { Icon(Icons.Outlined.ArrowBack, null) }
+            )
+        }
+    )
 }
 
 @Composable

@@ -23,8 +23,10 @@ public class SelfStartReceiverDecisionTest {
     }
 
     @Test public void nullReceiverAllowed() {
-        assertFalse(SelfStartDecision.decideReceiver(true, null, disabled(RCV), false, false).block);
-        assertFalse(SelfStartDecision.decideReceiver(true, "", disabled(RCV), false, false).block);
+        SelfStartDecision.Result nullResult = SelfStartDecision.decideReceiver(true, null, disabled(RCV), false, false);
+        assertFalse(nullResult.block); assertEquals("ALLOW_NULL", nullResult.reason);
+        SelfStartDecision.Result emptyResult = SelfStartDecision.decideReceiver(true, "", disabled(RCV), false, false);
+        assertFalse(emptyResult.block); assertEquals("ALLOW_NULL", emptyResult.reason);
     }
 
     @Test public void foregroundAllows() {

@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PackageManagerHidden
 import android.net.Uri
 import android.os.Parcelable
+import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
+import com.google.gson.Gson
 import dev.rikka.tools.refine.Refine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,6 +31,7 @@ import org.lsposed.npatch.config.Configs
 import org.lsposed.npatch.manager.MirrorSyncManager
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.share.Constants
+import org.lsposed.npatch.share.PatchConfig
 import java.io.File
 import java.io.IOException
 import java.text.Collator
@@ -92,6 +95,18 @@ object NPackageManager {
     }
 
     fun getIcon(appInfo: AppInfo) = appIcon[appInfo.app.packageName]!!
+
+    // Shared "is this app patched by NPatch" predicate (used by both the Manage screen and the
+    // Self-Start screen so the two never drift). The "npatch"/"lspatch" meta-data key is also
+    // written by other LSPatch-based patchers (e.g. ReVanced Xposed), whose config carries an
+    // all-zero lspConfig, so only accept configs that carry a genuine NPatch stamp (non-zero
+    // core version).
+    fun isNPatchPatched(appInfo: AppInfo): Boolean = runCatching {
+        val meta = appInfo.app.metaData?.getString("npatch") ?: return false
+        val json = Base64.decode(meta, Base64.DEFAULT).toString(Charsets.UTF_8)
+        val config = Gson().fromJson(json, PatchConfig::class.java)
+        config?.lspConfig != null && config.lspConfig.CORE_VERSION_CODE > 0
+    }.getOrDefault(false)
 
     suspend fun cleanTmpApkDir() {
         withContext(Dispatchers.IO) {
