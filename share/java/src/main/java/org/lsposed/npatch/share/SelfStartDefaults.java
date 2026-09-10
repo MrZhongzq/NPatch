@@ -49,4 +49,11 @@ public final class SelfStartDefaults {
     public static Set<String> defaultBlacklistSet() {
         return new LinkedHashSet<>(Arrays.asList(DEFAULT_BLACKLIST));
     }
+
+    /** ContentProvider delivery constants (v2 runtime config), shared by manager & loader. */
+    public static final String PROVIDER_AUTHORITY = "org.lsposed.npatch.manager.provider.config";
+    public static final String SELFSTART_QUERY_TYPE = "selfstart";
+    public static final String COL_MASTER = "master";
+    public static final String COL_DISABLED = "disabled";
+    public static final String DISABLED_SEP = "\n";
 }
