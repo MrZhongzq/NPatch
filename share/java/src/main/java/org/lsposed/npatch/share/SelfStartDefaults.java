@@ -55,5 +55,7 @@ public final class SelfStartDefaults {
     public static final String SELFSTART_QUERY_TYPE = "selfstart";
     public static final String COL_MASTER = "master";
     public static final String COL_DISABLED = "disabled";
+    public static final String COL_JOBS = "jobs";
+    public static final String COL_DISABLED_SERVICES = "disabled_services";
     public static final String DISABLED_SEP = "\n";
 }

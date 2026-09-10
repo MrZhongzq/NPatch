@@ -41,4 +41,17 @@ public final class SelfStartDecision {
         if (disabledReceivers != null && disabledReceivers.contains(receiverClass)) return BLOCK_RECEIVER_DISABLED;
         return ALLOW_DEFAULT;
     }
+
+    /** Job (WorkManager/JobScheduler) suppression: skip when enabled AND app is backgrounded. */
+    public static boolean shouldSkipJob(boolean suppressJobs, boolean hasResumedActivity) {
+        return suppressJobs && !hasResumedActivity;
+    }
+
+    /** Service suppression: skip when the service class is user-disabled AND app is backgrounded. */
+    public static boolean shouldSkipService(String serviceClass, java.util.Set<String> disabledServices,
+                                            boolean hasResumedActivity) {
+        if (hasResumedActivity) return false;
+        if (serviceClass == null || disabledServices == null) return false;
+        return disabledServices.contains(serviceClass);
+    }
 }
