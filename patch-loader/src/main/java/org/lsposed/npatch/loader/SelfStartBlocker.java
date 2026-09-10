@@ -16,7 +16,6 @@ import org.lsposed.npatch.share.SelfStartDecision;
 import org.lsposed.npatch.share.SelfStartDefaults;
 
 import java.io.File;
-import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -67,8 +66,28 @@ public final class SelfStartBlocker {
         AppCfg(boolean m, Set<String> d) { master = m; disabled = d; }
     }
 
-    /** Query the manager ContentProvider; on any failure fall back to the on-disk cache. */
+    private static final long PROVIDER_TIMEOUT_MS = 1000L;
+
+    /**
+     * Query the manager ContentProvider off-thread with a bounded wait, so a cold/slow manager
+     * process never adds unbounded latency to this app's startup. On timeout OR any failure, fall
+     * back to the on-disk cache (fail-open). The worker is a daemon thread and is left running past
+     * the timeout — if it later completes, the cache it writes still benefits the next launch.
+     */
     private static AppCfg fetchConfig(Context context, String pkg) {
+        final AppCfg[] result = new AppCfg[1];
+        Thread worker = new Thread(() -> {
+            try { result[0] = queryProvider(context, pkg); } catch (Throwable ignored) {}
+        });
+        worker.setDaemon(true);
+        worker.start();
+        try { worker.join(PROVIDER_TIMEOUT_MS); } catch (InterruptedException ignored) {}
+        if (result[0] != null) return result[0];   // got a fresh answer in time
+        return readCache(context);                  // timeout or failure -> last-known-good cache
+    }
+
+    /** The actual provider round-trip; writes the cache on success. Returns null on any failure. */
+    private static AppCfg queryProvider(Context context, String pkg) {
         Uri uri = Uri.parse("content://" + SelfStartDefaults.PROVIDER_AUTHORITY
                 + "?type=" + SelfStartDefaults.SELFSTART_QUERY_TYPE + "&package=" + pkg);
         try (Cursor c = context.getContentResolver().query(uri, null, null, null, null)) {
@@ -80,15 +99,17 @@ public final class SelfStartBlocker {
                 return new AppCfg(master == 1, set);
             }
         } catch (Throwable t) {
-            Log.w(TAG, "provider query failed, using cache", t);
+            Log.w(TAG, "provider query failed", t);
         }
-        return readCache(context);
+        return null;
     }
 
     private static Set<String> splitDisabled(String s) {
         Set<String> set = new LinkedHashSet<>();
         if (s != null && !s.isEmpty()) {
-            for (String x : s.split("\\n")) { String t = x.trim(); if (!t.isEmpty()) set.add(t); }
+            for (String x : s.split(java.util.regex.Pattern.quote(SelfStartDefaults.DISABLED_SEP))) {
+                String t = x.trim(); if (!t.isEmpty()) set.add(t);
+            }
         }
         return set;
     }
@@ -111,7 +132,8 @@ public final class SelfStartBlocker {
             File f = cacheFile(context);
             if (!f.exists()) return new AppCfg(false, new LinkedHashSet<>());
             byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
-            String[] lines = new String(b, java.nio.charset.StandardCharsets.UTF_8).split("\\n");
+            String[] lines = new String(b, java.nio.charset.StandardCharsets.UTF_8)
+                    .split(java.util.regex.Pattern.quote(SelfStartDefaults.DISABLED_SEP));
             boolean master = lines.length > 0 && "1".equals(lines[0].trim());
             Set<String> set = new LinkedHashSet<>();
             for (int i = 1; i < lines.length; i++) { String t = lines[i].trim(); if (!t.isEmpty()) set.add(t); }
