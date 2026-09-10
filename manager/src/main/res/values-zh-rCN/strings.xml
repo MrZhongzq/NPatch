@@ -129,5 +129,9 @@
     <string name="self_start_master_desc">开启后,下方被关闭的 receiver 会在应用下次启动时被拦截。改动无需重新修补。</string>
     <string name="self_start_receivers">广播接收器</string>
     <string name="self_start_autostart_tag">自启</string>
+    <string name="self_start_suppress_jobs">压制后台定时任务(WorkManager)</string>
+    <string name="self_start_suppress_jobs_desc">应用在后台时中和其 WorkManager/JobScheduler 任务,阻止自我唤醒。前台使用与推送(mipush/FCM)不受影响。较激进:可能延迟后台同步。下次启动生效。</string>
+    <string name="self_start_services">服务(Service)</string>
+    <string name="self_start_services_warn">关闭某服务会在后台将其中和。关掉播放/前台类服务可能导致应用异常,请谨慎选择。</string>
     <string name="self_start_empty">没有已修补的应用</string>
 </resources>

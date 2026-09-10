@@ -69,21 +69,55 @@ fun SelfStartAppScreen(packageName: String, navigator: DestinationsNavigator) {
                 desc = stringResource(R.string.self_start_master_desc)
             )
             HorizontalDivider()
-            Text(
-                text = stringResource(R.string.self_start_receivers),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            SettingsCheckBox(
+                modifier = Modifier.clickable { vm.setSuppressJobs(ctx, !vm.suppressJobs) },
+                checked = vm.suppressJobs,
+                title = stringResource(R.string.self_start_suppress_jobs),
+                desc = stringResource(R.string.self_start_suppress_jobs_desc)
             )
+            HorizontalDivider()
+            // 单一 LazyColumn 承载 receiver + service 两个分节,避免嵌套滚动容器崩溃。
             LazyColumn(Modifier.fillMaxSize()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.self_start_receivers),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
                 items(
                     items = vm.receivers,
-                    key = { it.className }
+                    key = { "recv:" + it.className }
                 ) { row ->
                     ReceiverRowItem(
                         row = row,
                         masterEnabled = vm.master,
                         onToggle = { enabled -> vm.toggleReceiver(ctx, row.className, enabled) }
+                    )
+                }
+                item {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.self_start_services),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.self_start_services_warn),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+                items(
+                    items = vm.services,
+                    key = { "svc:" + it.className }
+                ) { row ->
+                    ServiceRowItem(
+                        row = row,
+                        onToggle = { enabled -> vm.toggleService(ctx, row.className, enabled) }
                     )
                 }
             }
@@ -160,6 +194,50 @@ private fun ReceiverRowItem(
             Switch(
                 checked = row.enabled,
                 enabled = masterEnabled,
+                onCheckedChange = onToggle
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServiceRowItem(
+    row: SelfStartAppViewModel.ServiceRow,
+    onToggle: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = row.className.substringAfterLast('.'),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = row.className,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (row.vendorLabel.isNotEmpty()) {
+                    Text(
+                        text = row.vendorLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+            Switch(
+                checked = row.enabled,
                 onCheckedChange = onToggle
             )
         }

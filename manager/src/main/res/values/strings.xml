@@ -180,5 +180,9 @@
     <string name="self_start_master_desc">When on, disabled receivers below are neutralized on the app\'s next launch. Changes need no re-patch.</string>
     <string name="self_start_receivers">Broadcast receivers</string>
     <string name="self_start_autostart_tag">self-start</string>
+    <string name="self_start_suppress_jobs">Suppress background scheduled tasks (WorkManager)</string>
+    <string name="self_start_suppress_jobs_desc">Neutralize WorkManager/JobScheduler tasks while the app is in the background, to stop it self-waking. Foreground use and push (mipush/FCM) are unaffected. Aggressive: may delay background sync. Takes effect on the app\'s next launch.</string>
+    <string name="self_start_services">Services</string>
+    <string name="self_start_services_warn">Turning a service off neutralizes it in the background. Disabling a playback/foreground service may break the app — choose carefully.</string>
     <string name="self_start_empty">No patched apps</string>
 </resources>

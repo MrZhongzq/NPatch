@@ -20,9 +20,19 @@ class SelfStartAppViewModel : ViewModel() {
         val enabled: Boolean        // true=开(不拦), false=关(拦)
     )
 
+    data class ServiceRow(
+        val className: String,
+        val vendorLabel: String,
+        val enabled: Boolean   // true=开(不压), false=关(压)
+    )
+
     var master by mutableStateOf(false)
         private set
     var receivers by mutableStateOf(listOf<ReceiverRow>())
+        private set
+    var suppressJobs by mutableStateOf(false)
+        private set
+    var services by mutableStateOf(listOf<ServiceRow>())
         private set
 
     private lateinit var pkg: String
@@ -64,6 +74,16 @@ class SelfStartAppViewModel : ViewModel() {
                     enabled = name !in cfg.disabled
                 )
             }
+
+        suppressJobs = cfg.suppressJobs
+        val allSvc = try {
+            pm.getPackageInfo(packageName,
+                PackageManager.GET_SERVICES or PackageManager.MATCH_DISABLED_COMPONENTS)
+                .services?.map { it.name } ?: emptyList()
+        } catch (t: Throwable) { emptyList() }
+        services = allSvc.sorted().map { name ->
+            ServiceRow(name, SelfStartVendorLabels.labelFor(name), name !in cfg.disabledServices)
+        }
     }
 
     fun setMaster(ctx: Context, value: Boolean) {
@@ -74,5 +94,15 @@ class SelfStartAppViewModel : ViewModel() {
     fun toggleReceiver(ctx: Context, className: String, enabled: Boolean) {
         SelfStartConfigStore.setReceiver(ctx, pkg, className, enabled)
         receivers = receivers.map { if (it.className == className) it.copy(enabled = enabled) else it }
+    }
+
+    fun setSuppressJobs(ctx: Context, value: Boolean) {
+        suppressJobs = value
+        SelfStartConfigStore.setSuppressJobs(ctx, pkg, value)
+    }
+
+    fun toggleService(ctx: Context, className: String, enabled: Boolean) {
+        SelfStartConfigStore.setService(ctx, pkg, className, enabled)
+        services = services.map { if (it.className == className) it.copy(enabled = enabled) else it }
     }
 }
