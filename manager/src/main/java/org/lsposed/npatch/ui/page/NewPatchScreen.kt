@@ -436,6 +436,24 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             title = stringResource(R.string.patch_override_target_sdk),
             desc = stringResource(R.string.patch_override_target_sdk_desc)
         )
+        SettingsCheckBox(
+            modifier = Modifier.clickable { viewModel.selfStartManagement = !viewModel.selfStartManagement },
+            checked = viewModel.selfStartManagement,
+            icon = Icons.Outlined.Bolt,
+            title = stringResource(R.string.patch_self_start_management),
+            desc = stringResource(R.string.patch_self_start_management_desc)
+        )
+        if (viewModel.selfStartManagement) {
+            OutlinedTextField(
+                value = viewModel.selfStartBlacklistText,
+                onValueChange = { viewModel.selfStartBlacklistText = it },
+                label = { Text(stringResource(R.string.patch_self_start_blacklist_label)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                minLines = 4
+            )
+        }
         var bypassExpanded by remember { mutableStateOf(false) }
         AnywhereDropdown(
             expanded = bypassExpanded,
