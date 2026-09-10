@@ -54,6 +54,12 @@ object Patcher {
                     add("--originalSignature"); add(config.originalSignature)
                 }
                 if (config.useNPatchGms) add("--useNPatchGms")
+                if (config.selfStartManagement) {
+                    add("--self-start-management")
+                    if (config.selfStartBlacklist.isNotEmpty()) {
+                        add("--self-start-blacklist"); add(config.selfStartBlacklist.joinToString(","))
+                    }
+                }
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
                 }

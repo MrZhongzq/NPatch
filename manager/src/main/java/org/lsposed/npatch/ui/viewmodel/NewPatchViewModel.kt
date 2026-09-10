@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.Patcher
 import org.lsposed.npatch.share.PatchConfig
+import org.lsposed.npatch.share.SelfStartDefaults
 import nkbe.util.NPackageManager
 import nkbe.util.NPackageManager.AppInfo
 import org.lsposed.patch.util.Logger
@@ -52,6 +53,8 @@ class NewPatchViewModel : ViewModel() {
     var useNPatchGms by mutableStateOf(false)
     var overrideTargetSdk by mutableStateOf(false)
     var overrideTargetSdkValue by mutableStateOf("28")
+    var selfStartManagement by mutableStateOf(false)
+    var selfStartBlacklistText by mutableStateOf(SelfStartDefaults.DEFAULT_BLACKLIST.joinToString("\n"))
     var embeddedModules = emptyList<AppInfo>()
 
     lateinit var patchApp: AppInfo
@@ -105,7 +108,8 @@ class NewPatchViewModel : ViewModel() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
         val installerSource = getInstallerSource(patchApp.app.packageName)
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue.toIntOrNull()?.takeIf { it > 0 } ?: 28)
+        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue.toIntOrNull()?.takeIf { it > 0 } ?: 28, selfStartManagement,
+            selfStartBlacklistText.lines().map { it.trim() }.filter { it.isNotEmpty() }.toTypedArray())
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,

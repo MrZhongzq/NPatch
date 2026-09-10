@@ -26,6 +26,7 @@ import org.apache.commons.io.FilenameUtils;
 import org.lsposed.npatch.share.Constants;
 import org.lsposed.npatch.share.LSPConfig;
 import org.lsposed.npatch.share.PatchConfig;
+import org.lsposed.npatch.share.SelfStartDefaults;
 import org.lsposed.patch.util.ApkSignatureHelper;
 import org.lsposed.patch.util.JavaLogger;
 import org.lsposed.patch.util.Logger;
@@ -130,6 +131,12 @@ public class NPatch {
 
     @Parameter(names = {"--useNPatchGms"}, description = "Redirect GMS calls to NPatch built-in MicroG")
     private boolean useNPatchGms = false;
+
+    @Parameter(names = {"--self-start-management"}, description = "Enable self-start management: block blacklisted self-start broadcasts inside the patched app process")
+    private boolean selfStartManagement = false;
+
+    @Parameter(names = {"--self-start-blacklist"}, description = "Comma-separated broadcast actions to block as self-start (only used with --self-start-management; empty = built-in defaults)")
+    private String selfStartBlacklistCsv = "";
 
     @Parameter(names = {"-m", "--embed"}, description = "Embed provided modules to apk")
     private List<String> modules = new ArrayList<>();
@@ -405,7 +412,23 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue);
+            String[] selfStartBlacklist;
+            if (selfStartManagement) {
+                if (selfStartBlacklistCsv == null || selfStartBlacklistCsv.trim().isEmpty()) {
+                    selfStartBlacklist = SelfStartDefaults.DEFAULT_BLACKLIST.clone();
+                } else {
+                    String[] parts = selfStartBlacklistCsv.split(",");
+                    java.util.List<String> cleaned = new java.util.ArrayList<>();
+                    for (String p : parts) {
+                        String t = p.trim();
+                        if (!t.isEmpty()) cleaned.add(t);
+                    }
+                    selfStartBlacklist = cleaned.toArray(new String[0]);
+                }
+            } else {
+                selfStartBlacklist = new String[0];
+            }
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue, selfStartManagement, selfStartBlacklist);
             final var configBytes = GSON.toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
