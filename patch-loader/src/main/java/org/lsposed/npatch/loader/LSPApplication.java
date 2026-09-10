@@ -181,9 +181,12 @@ public class LSPApplication {
             GmsRedirector.activate(context, config.originalSignature);
         }
 
-        if (config.selfStartManagement) {
-            log("Activating self-start management");
-            SelfStartBlocker.activate(context, config);
+        // Self-start management (v2): the loader always pulls its per-receiver config from the
+        // manager at runtime; if the master switch is off it self-disables inside activate().
+        try {
+            SelfStartBlocker.activate(context);
+        } catch (Throwable t) {
+            log("Self-start activate failed (ignored)", t);
         }
 
         log("NPatch bootstrap completed");
