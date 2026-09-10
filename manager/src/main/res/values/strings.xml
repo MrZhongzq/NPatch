@@ -185,4 +185,8 @@
     <string name="self_start_services">Services</string>
     <string name="self_start_services_warn">Turning a service off neutralizes it in the background. Disabling a playback/foreground service may break the app — choose carefully.</string>
     <string name="self_start_empty">No patched apps</string>
+    <string name="self_start_broadcast_control">Broadcast control</string>
+    <string name="self_start_broadcast_control_desc">Master switch and per-receiver self-start toggles</string>
+    <string name="self_start_service_control">Service control</string>
+    <string name="self_start_service_control_desc">Per-service background toggles</string>
 </resources>

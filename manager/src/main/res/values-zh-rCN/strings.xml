@@ -134,4 +134,8 @@
     <string name="self_start_services">服务(Service)</string>
     <string name="self_start_services_warn">关闭某服务会在后台将其中和。关掉播放/前台类服务可能导致应用异常,请谨慎选择。</string>
     <string name="self_start_empty">没有已修补的应用</string>
+    <string name="self_start_broadcast_control">广播控制</string>
+    <string name="self_start_broadcast_control_desc">总开关 + 逐个 receiver 的自启开关</string>
+    <string name="self_start_service_control">服务控制</string>
+    <string name="self_start_service_control_desc">逐个 service 的后台开关</string>
 </resources>
