@@ -84,6 +84,9 @@ public final class SelfStartBlocker {
 
                     String action = intent.getAction();
                     boolean selfSent = isSelfSent(intent);
+                    // enabled=true literal: activation is already gated by
+                    // config.selfStartManagement in LSPApplication before this receiver is
+                    // registered, so decide() is only ever reached when management is on.
                     SelfStartDecision.Result r = SelfStartDecision.decide(
                             true, action, blacklist, resumedCount.get() > 0, selfSent);
 

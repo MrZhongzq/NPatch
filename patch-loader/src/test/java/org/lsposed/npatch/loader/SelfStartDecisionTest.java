@@ -6,7 +6,6 @@ import org.junit.Test;
 import org.lsposed.npatch.share.SelfStartDecision;
 import org.lsposed.npatch.share.SelfStartDefaults;
 
-import java.util.Collections;
 import java.util.Set;
 
 public class SelfStartDecisionTest {

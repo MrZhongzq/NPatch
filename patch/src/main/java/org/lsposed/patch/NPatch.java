@@ -136,7 +136,7 @@ public class NPatch {
     private boolean selfStartManagement = false;
 
     @Parameter(names = {"--self-start-blacklist"}, description = "Comma-separated broadcast actions to block as self-start (only used with --self-start-management; empty = built-in defaults)")
-    private String selfStartBlacklistCsv = "";
+    private String selfStartBlacklistCsv = null;
 
     @Parameter(names = {"-m", "--embed"}, description = "Embed provided modules to apk")
     private List<String> modules = new ArrayList<>();
@@ -414,9 +414,12 @@ public class NPatch {
             // modify manifest
             String[] selfStartBlacklist;
             if (selfStartManagement) {
-                if (selfStartBlacklistCsv == null || selfStartBlacklistCsv.trim().isEmpty()) {
+                if (selfStartBlacklistCsv == null) {
+                    // Flag omitted entirely (pure-CLI convenience): use built-in defaults.
                     selfStartBlacklist = SelfStartDefaults.DEFAULT_BLACKLIST.clone();
                 } else {
+                    // Flag present (from the manager, or an explicit CLI value): authoritative,
+                    // even when empty (empty == block nothing).
                     String[] parts = selfStartBlacklistCsv.split(",");
                     java.util.List<String> cleaned = new java.util.ArrayList<>();
                     for (String p : parts) {

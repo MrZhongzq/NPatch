@@ -56,9 +56,9 @@ object Patcher {
                 if (config.useNPatchGms) add("--useNPatchGms")
                 if (config.selfStartManagement) {
                     add("--self-start-management")
-                    if (config.selfStartBlacklist.isNotEmpty()) {
-                        add("--self-start-blacklist"); add(config.selfStartBlacklist.joinToString(","))
-                    }
+                    // Always pass the flag (even empty) so an explicitly-cleared blacklist means
+                    // "block nothing" rather than falling back to NPatch's built-in defaults.
+                    add("--self-start-blacklist"); add(config.selfStartBlacklist?.joinToString(",") ?: "")
                 }
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
