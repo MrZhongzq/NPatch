@@ -181,6 +181,11 @@ public class LSPApplication {
             GmsRedirector.activate(context, config.originalSignature);
         }
 
+        if (config.selfStartManagement) {
+            log("Activating self-start management");
+            SelfStartBlocker.activate(context, config);
+        }
+
         log("NPatch bootstrap completed");
     }
 
