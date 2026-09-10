@@ -38,6 +38,8 @@ public final class SelfStartBlocker {
 
     private static volatile boolean masterEnabled = false;
     private static volatile Set<String> disabledReceivers = new LinkedHashSet<>();
+    private static volatile boolean suppressJobs = false;
+    private static volatile Set<String> disabledServices = new LinkedHashSet<>();
     private static String ownPackage;
     private static final AtomicInteger resumedCount = new AtomicInteger(0);
 
@@ -49,13 +51,21 @@ public final class SelfStartBlocker {
             AppCfg cfg = fetchConfig(context, ownPackage);   // provider → cache fallback
             masterEnabled = cfg.master;
             disabledReceivers = cfg.disabled;
-            if (!masterEnabled) {
-                Log.i(TAG, "Self-start master off, hook not installed");
+            suppressJobs = cfg.suppressJobs;
+            disabledServices = cfg.disabledServices;
+
+            boolean needReceiver = masterEnabled;
+            boolean needJob = suppressJobs;
+            boolean needService = !disabledServices.isEmpty();
+            if (!needReceiver && !needJob && !needService) {
+                Log.i(TAG, "Self-start: nothing enabled, no hooks");
                 return;
             }
             registerForegroundTracker(context);
-            hookHandleReceiver();
-            Log.i(TAG, "Self-start active, disabled receivers=" + disabledReceivers.size());
+            if (needReceiver) hookHandleReceiver();
+            if (needJob) hookJobService(context);
+            Log.i(TAG, "Self-start active: receiver=" + needReceiver
+                    + " jobs=" + needJob + " services=" + disabledServices.size());
         } catch (Throwable t) {
             Log.e(TAG, "activate failed (fail-open)", t);
         }
@@ -63,7 +73,10 @@ public final class SelfStartBlocker {
 
     private static final class AppCfg {
         final boolean master; final Set<String> disabled;
-        AppCfg(boolean m, Set<String> d) { master = m; disabled = d; }
+        final boolean suppressJobs; final Set<String> disabledServices;
+        AppCfg(boolean m, Set<String> d, boolean j, Set<String> s) {
+            master = m; disabled = d; suppressJobs = j; disabledServices = s;
+        }
     }
 
     private static final long PROVIDER_TIMEOUT_MS = 1000L;
@@ -94,9 +107,13 @@ public final class SelfStartBlocker {
             if (c != null && c.moveToFirst()) {
                 int master = c.getInt(c.getColumnIndexOrThrow(SelfStartDefaults.COL_MASTER));
                 String disabled = c.getString(c.getColumnIndexOrThrow(SelfStartDefaults.COL_DISABLED));
-                Set<String> set = splitDisabled(disabled);
-                writeCache(context, master == 1, set);
-                return new AppCfg(master == 1, set);
+                boolean jobs = getIntSafe(c, SelfStartDefaults.COL_JOBS) == 1;
+                String svc = getStringSafe(c, SelfStartDefaults.COL_DISABLED_SERVICES);
+                Set<String> rSet = splitSet(disabled);
+                Set<String> sSet = splitSet(svc);
+                AppCfg cfg = new AppCfg(master == 1, rSet, jobs, sSet);
+                writeCache(context, cfg);
+                return cfg;
             }
         } catch (Throwable t) {
             Log.w(TAG, "provider query failed", t);
@@ -104,7 +121,15 @@ public final class SelfStartBlocker {
         return null;
     }
 
-    private static Set<String> splitDisabled(String s) {
+    private static int getIntSafe(Cursor c, String col) {
+        int i = c.getColumnIndex(col); return i < 0 ? 0 : c.getInt(i);
+    }
+
+    private static String getStringSafe(Cursor c, String col) {
+        int i = c.getColumnIndex(col); return i < 0 ? null : c.getString(i);
+    }
+
+    private static Set<String> splitSet(String s) {
         Set<String> set = new LinkedHashSet<>();
         if (s != null && !s.isEmpty()) {
             for (String x : s.split(java.util.regex.Pattern.quote(SelfStartDefaults.DISABLED_SEP))) {
@@ -118,29 +143,35 @@ public final class SelfStartBlocker {
         return new File(context.getCacheDir(), CACHE_FILE);
     }
 
-    private static void writeCache(Context context, boolean master, Set<String> disabled) {
+    private static void writeCache(Context context, AppCfg cfg) {
         try {
-            StringBuilder sb = new StringBuilder(master ? "1" : "0");
-            for (String r : disabled) sb.append('\n').append(r);
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("master", cfg.master);
+            o.put("jobs", cfg.suppressJobs);
+            o.put("disabled", new org.json.JSONArray(cfg.disabled));
+            o.put("services", new org.json.JSONArray(cfg.disabledServices));
             java.nio.file.Files.write(cacheFile(context).toPath(),
-                    sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    o.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (Throwable ignored) {}
     }
 
     private static AppCfg readCache(Context context) {
         try {
             File f = cacheFile(context);
-            if (!f.exists()) return new AppCfg(false, new LinkedHashSet<>());
+            if (!f.exists()) return new AppCfg(false, new LinkedHashSet<>(), false, new LinkedHashSet<>());
             byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
-            String[] lines = new String(b, java.nio.charset.StandardCharsets.UTF_8)
-                    .split(java.util.regex.Pattern.quote(SelfStartDefaults.DISABLED_SEP));
-            boolean master = lines.length > 0 && "1".equals(lines[0].trim());
-            Set<String> set = new LinkedHashSet<>();
-            for (int i = 1; i < lines.length; i++) { String t = lines[i].trim(); if (!t.isEmpty()) set.add(t); }
-            return new AppCfg(master, set);
+            org.json.JSONObject o = new org.json.JSONObject(new String(b, java.nio.charset.StandardCharsets.UTF_8));
+            return new AppCfg(o.optBoolean("master", false), jsonToSet(o.optJSONArray("disabled")),
+                    o.optBoolean("jobs", false), jsonToSet(o.optJSONArray("services")));
         } catch (Throwable t) {
-            return new AppCfg(false, new LinkedHashSet<>());
+            return new AppCfg(false, new LinkedHashSet<>(), false, new LinkedHashSet<>());
         }
+    }
+
+    private static Set<String> jsonToSet(org.json.JSONArray a) {
+        Set<String> s = new LinkedHashSet<>();
+        if (a != null) for (int i = 0; i < a.length(); i++) s.add(a.optString(i));
+        s.remove(""); s.remove(null); return s;
     }
 
     private static void registerForegroundTracker(Context context) {
@@ -187,6 +218,32 @@ public final class SelfStartBlocker {
                 }
             }
         });
+    }
+
+    private static void hookJobService(Context context) {
+        try {
+            Class<?> sjs = Class.forName(
+                    "androidx.work.impl.background.systemjob.SystemJobService",
+                    false, context.getClassLoader());
+            XposedBridge.hookAllMethods(sjs, "onStartJob", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        if (SelfStartDecision.shouldSkipJob(suppressJobs, resumedCount.get() > 0)) {
+                            Log.i(TAG, "[SelfStart] JOB-SKIP");
+                            param.setResult(false);   // 无活完成,系统不立即重排(防风暴)
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "onStartJob hook error (fail-open)", t);
+                    }
+                }
+            });
+            Log.i(TAG, "Job suppression hook installed");
+        } catch (ClassNotFoundException e) {
+            Log.i(TAG, "No WorkManager SystemJobService in this app, job hook skipped");
+        } catch (Throwable t) {
+            Log.w(TAG, "hookJobService failed (fail-open)", t);
+        }
     }
 
     /** ReceiverData.info is the receiver's ActivityInfo; its name is the receiver class. */
