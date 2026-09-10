@@ -1,6 +1,11 @@
 # 自启动管理(Self-Start Management)设计
 
-- 状态:设计已批准,待写实现计划
+> **⚠️ 本 v1 设计已被 `2026-09-10-self-start-management-v2-runtime-design.md` 取代。**
+> v1(修补时烘焙 action 黑名单)已实现并合入 102(commits d6db4e0..a3cec6b),但用户随后改需求为
+> Thanox 式运行时·逐 app·逐 receiver 管理(新底栏 tab,不用重修)。v2 会移除 v1 的修补时 UI/CLI/PatchConfig 字段,
+> 复用并改造 loader 的 `SelfStartBlocker`。本文件保留作历史参考。
+
+- 状态:**已被 v2 取代(superseded)**
 - 日期:2026-09-10
 - 分支:102
 - 相关:[[project-upstream-port-2026-09]]、现有 `GmsRedirector`(hook 模板)、`MiPushFallbackReceiver`(manager 侧既有骨架)
