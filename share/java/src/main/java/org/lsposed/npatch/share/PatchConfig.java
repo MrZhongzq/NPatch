@@ -18,8 +18,6 @@ public class PatchConfig {
     public final boolean useNPatchGms;
     public final boolean overrideTargetSdk;
     public final int overrideTargetSdkValue;
-    public final boolean selfStartManagement;
-    public final String[] selfStartBlacklist;
 
     public PatchConfig(
             boolean useManager,
@@ -35,9 +33,7 @@ public class PatchConfig {
             String installerSource,
             boolean useNPatchGms,
             boolean overrideTargetSdk,
-            int overrideTargetSdkValue,
-            boolean selfStartManagement,
-            String[] selfStartBlacklist
+            int overrideTargetSdkValue
     ) {
         this.useManager = useManager;
         this.debuggable = debuggable;
@@ -55,7 +51,5 @@ public class PatchConfig {
         this.useNPatchGms = useNPatchGms;
         this.overrideTargetSdk = overrideTargetSdk;
         this.overrideTargetSdkValue = overrideTargetSdkValue;
-        this.selfStartManagement = selfStartManagement;
-        this.selfStartBlacklist = selfStartBlacklist == null ? new String[0] : selfStartBlacklist;
     }
 }

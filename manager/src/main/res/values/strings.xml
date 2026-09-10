@@ -83,9 +83,6 @@
     <string name="patch_override_version_code_desc">Override the patched app\'s version code to 1\nThis allows downgrade installation in the future, and generally this will not affect the version code actually perceived by the application</string>
     <string name="patch_override_target_sdk">Override targetSdk</string>
     <string name="patch_override_target_sdk_desc">Rewrite the patched app\'s targetSdk to 28\nImproves compatibility of Xposed modules that rely on legacy Android behaviours</string>
-    <string name="patch_self_start_management">Self-start management</string>
-    <string name="patch_self_start_management_desc">Block blacklisted self-start broadcasts inside the patched app (e.g. BOOT_COMPLETED) so it stops waking itself to drain battery. Push (mipush/FCM) is always allowed.</string>
-    <string name="patch_self_start_blacklist_label">Blocked broadcast actions (one per line)</string>
     <string name="patch_inject_mt_provider">Inject Files Provider</string>
     <string name="patch_inject_mt_provider_desc">Inject file providers to manage files in the data directory without root privileges (From MT Manager)</string>
     <string name="patch_enable_mirror_mode">Enable mirror mode</string>

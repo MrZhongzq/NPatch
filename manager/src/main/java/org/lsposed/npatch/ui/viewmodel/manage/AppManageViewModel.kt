@@ -137,7 +137,7 @@ class AppManageViewModel : ViewModel() {
                         c.useManager, c.debuggable, c.overrideVersionCode, 3,
                         c.originalSignature, c.appComponentFactory, c.injectProvider,
                         c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms,
-                        c.overrideTargetSdk, c.overrideTargetSdkValue, c.selfStartManagement, c.selfStartBlacklist
+                        c.overrideTargetSdk, c.overrideTargetSdkValue
                     )
                     updateLoader(action.appInfo, lv3)
                 }
@@ -151,7 +151,7 @@ class AppManageViewModel : ViewModel() {
                         toManager, c.debuggable, c.overrideVersionCode, c.sigBypassLevel,
                         c.originalSignature, c.appComponentFactory, c.injectProvider,
                         c.mirrorMode, c.outputLog, c.newPackage, c.installerSource, c.useNPatchGms,
-                        c.overrideTargetSdk, c.overrideTargetSdkValue, c.selfStartManagement, c.selfStartBlacklist
+                        c.overrideTargetSdk, c.overrideTargetSdkValue
                     )
                     updateLoader(action.appInfo, converted, dropEmbeddedModules = toManager)
                 }
