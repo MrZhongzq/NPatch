@@ -10,6 +10,7 @@ import org.lsposed.npatch.database.LSPDatabase
 import org.lsposed.npatch.database.entity.Module
 import org.lsposed.npatch.database.entity.Scope
 import org.lsposed.npatch.lspApp
+import org.lsposed.npatch.util.LocalInjectedModuleService
 import org.lsposed.npatch.util.ModuleLoader
 import java.io.File
 
@@ -91,6 +92,11 @@ object ConfigManager {
                         apkPath = it.apkPath
                         applicationInfo = ai
                         appId = ai?.uid ?: -1
+                        // The MODERN pipeline's VectorContext also requires a non-null service (the
+                        // module's remote-prefs/file binder). Its Stub lives here in the manager; the
+                        // module in the target process calls back over Binder. Legacy never read it,
+                        // hence long missing on this IPC path (NeoLocal/Integr already set it).
+                        service = LocalInjectedModuleService(lspApp, it.pkgName)
                         file = ModuleLoader.loadModule(it.apkPath)
                     }
                 }
