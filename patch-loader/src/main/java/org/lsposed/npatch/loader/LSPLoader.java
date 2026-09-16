@@ -24,11 +24,21 @@ public class LSPLoader {
         lpparam.appInfo = loadedApk.getApplicationInfo();
         lpparam.isFirstApplication = true;
         XC_LoadPackage.callAll(lpparam);
-        // Modern (libxposed api 10x) modules have no in-process hook to trigger their
-        // onPackageLoaded — in the framework it comes from LoadedApkHookers, which never fires here
-        // because the target LoadedApk already exists. Dispatch it directly, mirroring callAll above.
+        // Modern (libxposed api 10x) modules have no in-process hook to trigger their onPackageLoaded/
+        // onPackageReady — in the framework those come from LoadedApkHookers, which never fires here
+        // because the target LoadedApk already exists. Dispatch them directly, mirroring callAll above.
+        // getAppFactory() is a hidden LoadedApk method — reflect it, fall back to a plain instance so a
+        // module that reads PackageReadyParam.getAppComponentFactory() still gets a valid object.
+        Object appComponentFactory = null;
+        try {
+            appComponentFactory = LoadedApk.class.getMethod("getAppFactory").invoke(loadedApk);
+        } catch (Throwable ignored) {
+        }
+        if (appComponentFactory == null) {
+            appComponentFactory = new android.app.AppComponentFactory();
+        }
         XposedInit.loadModernPackage(loadedApk.getPackageName(), loadedApk.getApplicationInfo(),
-                loadedApk.getClassLoader());
+                loadedApk.getClassLoader(), appComponentFactory);
     }
 
     private static void setPackageNameForResDir(String packageName, String resDir) {
