@@ -61,6 +61,15 @@ object MirrorSyncManager {
 
     private val gson = Gson()
     private val syncMutex = Mutex()
+
+    // Set by pausingSync while an (un)install is queued or running. A sync round of a large app
+    // (QQ: chat DBs + thousands of cache files) can hold syncMutex for minutes; without this the
+    // install just blocks on the mutex that whole time, with the UI stuck on "installing" and no
+    // progress. The in-flight round polls this between roots/files and bails early so the mutex
+    // frees within ~one file, letting the install start almost immediately. Safety is unchanged:
+    // the round still stops touching the app's provider before the install proceeds.
+    @Volatile
+    private var installWaiting = false
     private val documentProjection = arrayOf(
         DocumentsContract.Document.COLUMN_DOCUMENT_ID,
         DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -99,6 +108,10 @@ object MirrorSyncManager {
             val baselineDir = File(context.filesDir, BASELINE_DIR)
             val queueFile = File(context.filesDir, QUEUE_FILE)
             for (target in loadMirrorTargets(context)) {
+                if (installWaiting) {
+                    Log.i(TAG, "Mirror sync yielding to a pending (un)install")
+                    break
+                }
                 runCatching {
                     syncTarget(context, target, File(baseDir, target.packageName), baselineDir, queueFile)
                 }.onFailure {
@@ -118,7 +131,16 @@ object MirrorSyncManager {
      * ContentProvider it triggers a dead/frozen-binder transaction storm that gets the whole manager
      * SIGKILLed. Wrap install/uninstall in this so mirror never touches an app being (re)installed.
      */
-    suspend fun <T> pausingSync(block: suspend () -> T): T = syncMutex.withLock { block() }
+    suspend fun <T> pausingSync(block: suspend () -> T): T {
+        // Raise the flag BEFORE contending for the mutex so an in-flight round sees it and bails
+        // early instead of making the install wait out the whole round.
+        installWaiting = true
+        try {
+            return syncMutex.withLock { block() }
+        } finally {
+            installWaiting = false
+        }
+    }
 
     /** Whether a package has a ready write-back staging awaiting apply on next app start. */
     fun isWritebackPending(context: Context, packageName: String): Boolean {
@@ -152,6 +174,7 @@ object MirrorSyncManager {
         handleAppliedMarker(resolver, target, baselineDir, queueFile)
 
         for (rootDir in listRemoteChildren(resolver, target.authority, target.packageName)) {
+            if (installWaiting) return // yield to a pending (un)install (see pausingSync)
             if (!rootDir.isDirectory) continue
             runCatching {
                 syncRoot(
@@ -222,6 +245,11 @@ object MirrorSyncManager {
         allPaths.addAll(changeSet.deleted)
 
         for (relPath in allPaths) {
+            // Yield to a pending (un)install: the per-file copy is where a round spends its minutes,
+            // so bailing here frees syncMutex within ~one file. Abort the whole root (return) rather
+            // than break — skipping the baseline save leaves the existing baseline intact so the next
+            // round simply re-evaluates from it; a partial-snapshot save could mask un-exported files.
+            if (installWaiting) return
             // Names illegal on the sdcardfs mirror (QQ's URL-named caches with ':' '?', ':'-named
             // dbs, ...) can NEVER be created there — skip up front with a string check instead of a
             // per-file copyRemoteToLocal open()->EPERM->log. Thousands of such files were the
