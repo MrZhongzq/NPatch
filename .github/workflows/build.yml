@@ -67,6 +67,11 @@ jobs:
 
     - name: 設定 Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        # setup-android@v3 defaults packages to "tools platform-tools"; the legacy "tools"
+        # package was removed from Google's SDK repo, so the default now fails with
+        # "Failed to find package 'tools'" + a license-acceptance error. Drop "tools".
+        packages: 'platform-tools'
 
     - name: 設定 ninja
       uses: seanmiddleditch/gha-setup-ninja@master
