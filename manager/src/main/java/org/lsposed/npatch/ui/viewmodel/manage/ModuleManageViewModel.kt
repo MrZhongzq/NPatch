@@ -29,17 +29,21 @@ class ModuleManageViewModel : ViewModel() {
 
     val appList: List<Pair<NPackageManager.AppInfo, XposedInfo>> by derivedStateOf {
         NPackageManager.appList.mapNotNull { appInfo ->
-            val metaData = appInfo.app.metaData ?: return@mapNotNull null
+            // isXposedModule now covers BOTH legacy (manifest xposedminversion) and modern
+            // (libxposed api 101/102, declared via META-INF/xposed/ with no manifest field);
+            // it and the module metadata (api/description/scope) are precomputed in fetchAppList.
+            if (!appInfo.isXposedModule) return@mapNotNull null
             // A patched host apk carries the "npatch"/"lspatch" patch config; it is not an
-            // Xposed module even if it also declares xposedminversion (e.g. patched module apps
+            // Xposed module even if it also declares module markers (e.g. patched module apps
             // or LSPatch/ReVanced outputs) — don't mistake it for one.
-            if (metaData.getString("npatch") != null || metaData.getString("lspatch") != null) {
+            val metaData = appInfo.app.metaData
+            if (metaData?.getString("npatch") != null || metaData?.getString("lspatch") != null) {
                 return@mapNotNull null
             }
             appInfo to XposedInfo(
-                metaData.getInt("xposedminversion", -1).also { if (it == -1) return@mapNotNull null },
-                metaData.getString("xposeddescription") ?: "",
-                emptyList() // TODO: scope
+                appInfo.moduleApi,
+                appInfo.moduleDescription,
+                appInfo.moduleScope
             )
         }.also {
             Log.d(TAG, "Loaded ${it.size} Xposed modules")

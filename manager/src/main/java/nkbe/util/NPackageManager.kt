@@ -36,6 +36,7 @@ import java.io.File
 import java.io.IOException
 import java.text.Collator
 import java.util.*
+import java.util.zip.ZipFile
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -47,10 +48,20 @@ object NPackageManager {
     const val STATUS_USER_CANCELLED = -2
 
     @Parcelize
-    class AppInfo(val app: ApplicationInfo, val label: String) : Parcelable {
-        val isXposedModule: Boolean
-            get() = app.metaData?.get("xposedminversion") != null
-    }
+    class AppInfo(
+        val app: ApplicationInfo,
+        val label: String,
+        // Whether this app is an Xposed module — legacy (manifest meta-data) OR modern
+        // (libxposed api 101/102, declared via META-INF/xposed/ in the APK). Computed once in
+        // fetchAppList off the main thread (see resolveXposedModule); default false for AppInfo
+        // instances built outside the scan (e.g. a freshly-patched apk).
+        val isXposedModule: Boolean = false,
+        // Module metadata, populated when isXposedModule is true. api = targetApiVersion (modern)
+        // or xposedminversion (legacy); -1 when not a module.
+        val moduleApi: Int = -1,
+        val moduleDescription: String = "",
+        val moduleScope: List<String> = emptyList()
+    ) : Parcelable
 
     var appList by mutableStateOf(listOf<AppInfo>())
         private set
@@ -81,7 +92,7 @@ object NPackageManager {
 
             applicationList.forEach {
                 val label = pm.getApplicationLabel(it)
-                collection.add(AppInfo(it, label.toString()))
+                collection.add(resolveAppInfo(it, label.toString()))
                 appIcon[it.packageName] = iconLoader.loadIcon(it).asImageBitmap()
             }
 
@@ -95,6 +106,79 @@ object NPackageManager {
     }
 
     fun getIcon(appInfo: AppInfo) = appIcon[appInfo.app.packageName]!!
+
+    /** Build an AppInfo, resolving legacy + modern Xposed-module status/metadata (runs on IO). */
+    private fun resolveAppInfo(app: ApplicationInfo, label: String): AppInfo {
+        val meta = app.metaData
+        // Legacy module: presence of the xposedminversion manifest meta-data (any value).
+        if (meta != null && meta.containsKey("xposedminversion")) {
+            val api = extractIntPart(meta.get("xposedminversion")).coerceAtLeast(0)
+            val desc = (meta.get("xposeddescription") as? String)?.trim() ?: ""
+            return AppInfo(app, label, isXposedModule = true, moduleApi = api, moduleDescription = desc)
+        }
+        // Modern module (libxposed api 101/102): declared via META-INF/xposed/ inside the APK, with
+        // NO manifest meta-data. LSPosed can scan every app because it is a privileged framework;
+        // NPatch is a plain app and cannot list /data/app — but PackageManager already handed us
+        // each app's exact sourceDir, and app APKs (publicSourceDir) are world-readable, so we can
+        // open them by path. Only scan non-system apps (modules are user-installed) to keep the
+        // refresh fast, and fail-safe on any unreadable APK.
+        if ((app.flags and ApplicationInfo.FLAG_SYSTEM) == 0) {
+            val modern = readModernModule(app)
+            if (modern != null) {
+                return AppInfo(
+                    app, label, isXposedModule = true,
+                    moduleApi = modern.api, moduleDescription = modern.description, moduleScope = modern.scope
+                )
+            }
+        }
+        return AppInfo(app, label)
+    }
+
+    private class ModernModule(val api: Int, val description: String, val scope: List<String>)
+
+    /**
+     * Reads META-INF/xposed/{java_init.list,module.prop,scope.list} from the base APK or a split.
+     * Returns null when the app is not a modern module or the APK can't be read. ZipFile only reads
+     * the central directory, so this is cheap even for large APKs.
+     */
+    private fun readModernModule(app: ApplicationInfo): ModernModule? {
+        val apks = buildList {
+            app.sourceDir?.let { add(it) }
+            app.splitSourceDirs?.let { addAll(it) }
+        }
+        for (path in apks) {
+            try {
+                ZipFile(path).use { zip ->
+                    if (zip.getEntry("META-INF/xposed/java_init.list") == null) return@use
+                    var api = -1
+                    var description = ""
+                    zip.getEntry("META-INF/xposed/module.prop")?.let { e ->
+                        val prop = Properties()
+                        zip.getInputStream(e).use { prop.load(it) }
+                        api = extractIntPart(prop.getProperty("targetApiVersion"))
+                            .let { if (it >= 0) it else extractIntPart(prop.getProperty("minApiVersion")) }
+                        description = prop.getProperty("description")?.trim() ?: ""
+                    }
+                    val scope = zip.getEntry("META-INF/xposed/scope.list")?.let { e ->
+                        zip.getInputStream(e).bufferedReader().use { r ->
+                            r.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+                        }
+                    } ?: emptyList()
+                    return ModernModule(if (api >= 0) api else 100, description, scope)
+                }
+            } catch (_: Throwable) {
+                // Unreadable APK / not a zip / permission denied → treat as non-modern (fail-safe).
+            }
+        }
+        return null
+    }
+
+    /** Leading integer of an Int or String meta value; -1 if absent/unparseable. */
+    private fun extractIntPart(raw: Any?): Int = when (raw) {
+        is Int -> raw
+        is String -> Regex("\\d+").find(raw)?.value?.toIntOrNull() ?: -1
+        else -> -1
+    }
 
     // Shared "is this app patched by NPatch" predicate (used by both the Manage screen and the
     // Self-Start screen so the two never drift). The "npatch"/"lspatch" meta-data key is also
