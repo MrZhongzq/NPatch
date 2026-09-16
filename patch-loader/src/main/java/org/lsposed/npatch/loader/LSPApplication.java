@@ -42,6 +42,7 @@ import java.util.function.BiConsumer;
 
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.XposedInit;
 import hidden.HiddenApiBridge;
 
 /**
@@ -159,6 +160,16 @@ public class LSPApplication {
         disableProfile(context);
         Startup.initXposed(false, ActivityThread.currentProcessName(), context.getApplicationInfo().dataDir, service);
         Startup.bootstrapXposed(false);
+        // Register modern (libxposed api 10x) modules. bootstrapXposed only wires the legacy pipeline
+        // (loadLegacyModules); the modern loadModules() is normally driven by AppAttachHooker on
+        // ActivityThread.attach, which already fired before this in-process bootstrap — so it never
+        // runs here. Call it directly, mirroring the legacy path, or modern modules never load.
+        // Guarded so a modern-load failure can't abort legacy loading / sig-bypass / self-start below.
+        try {
+            XposedInit.loadModules(activityThread);
+        } catch (Throwable t) {
+            log("Modern module registration failed (ignored)", t);
+        }
 
         // Start file-based log capture (replaces setLogPrinter removed in Vector v2.0)
         if (config.outputLog) {

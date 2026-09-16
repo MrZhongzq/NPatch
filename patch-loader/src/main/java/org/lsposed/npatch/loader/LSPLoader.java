@@ -24,6 +24,11 @@ public class LSPLoader {
         lpparam.appInfo = loadedApk.getApplicationInfo();
         lpparam.isFirstApplication = true;
         XC_LoadPackage.callAll(lpparam);
+        // Modern (libxposed api 10x) modules have no in-process hook to trigger their
+        // onPackageLoaded — in the framework it comes from LoadedApkHookers, which never fires here
+        // because the target LoadedApk already exists. Dispatch it directly, mirroring callAll above.
+        XposedInit.loadModernPackage(loadedApk.getPackageName(), loadedApk.getApplicationInfo(),
+                loadedApk.getClassLoader());
     }
 
     private static void setPackageNameForResDir(String packageName, String resDir) {
