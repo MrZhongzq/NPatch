@@ -111,9 +111,12 @@ jobs:
       run: |
         cd api
         echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
+        chmod +x gradlew
         ./gradlew :api:publishApiPublicationToMavenLocal
         cd ../service
         echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
+        # the service fork's gradlew may not carry the executable bit; ensure it here
+        chmod +x gradlew
         ./gradlew :interface:publishInterfacePublicationToMavenLocal
 
     - name: 設定 commit id
