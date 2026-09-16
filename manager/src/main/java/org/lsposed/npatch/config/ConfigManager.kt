@@ -79,9 +79,18 @@ object ConfigManager {
                     Log.i(TAG, "Module apk path updated: ${it.pkgName}")
                 }
                 loadedModules.getOrPut(it) {
+                    // applicationInfo/appId are required by the MODERN pipeline (VectorModuleManager
+                    // builds a VectorContext from them → NPE "applicationInfo must not be null" if left
+                    // null); the legacy pipeline never read them, which is why this was long missing
+                    // on the manager IPC path (NeoLocal/Integr services already set it).
+                    val ai = runCatching {
+                        lspApp.packageManager.getApplicationInfo(it.pkgName, 0)
+                    }.getOrNull()
                     org.lsposed.lspd.models.Module().apply {
                         packageName = it.pkgName
                         apkPath = it.apkPath
+                        applicationInfo = ai
+                        appId = ai?.uid ?: -1
                         file = ModuleLoader.loadModule(it.apkPath)
                     }
                 }
