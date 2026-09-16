@@ -98,6 +98,11 @@
     <string name="patch_lv4_incompatible_text">This app ships its own seccomp sandbox (a Gecko/Chromium engine). lv4\'s seccomp filter conflicts with it and usually crashes the app. lv3 has no seccomp and works for such apps. Fall back to lv3?</string>
     <string name="patch_lv4_fallback_lv3">Use lv3</string>
     <string name="patch_lv4_force">Keep lv4</string>
+    <string name="patch_sign_v1">Add v1 (JAR) signature</string>
+    <string name="patch_sign_v1_desc">Off by default: signs v2+v3 only. Turn on only if the app won\'t install/run without a v1 signature (very old apps, or apps that read the v1 JAR signature). v2+v3 are always kept.</string>
+    <string name="patch_missing_sig_title">Original signature unreadable</string>
+    <string name="patch_missing_sig_text">This app\'s original signature can\'t be read — it may be unsigned or a repackaged (e.g. ReVanced) apk with a broken signature. You can still patch it, but signature spoofing will be disabled, so apps that verify their own signature may misbehave. Continue?</string>
+    <string name="patch_missing_sig_continue">Patch anyway</string>
     <string name="manage_lv4_incompatible_warning">lv4 may be incompatible with this app — re-sign with lv3 if it crashes</string>
     <string name="manage_resign_lv3">Re-sign with lv3</string>
     <string name="manage_convert_to_local">Convert to local (manager) mode</string>

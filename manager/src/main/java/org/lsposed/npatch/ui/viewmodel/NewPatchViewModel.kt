@@ -7,12 +7,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.lsposed.npatch.lspApp
 import org.lsposed.npatch.Patcher
+import org.lsposed.npatch.share.Constants
 import org.lsposed.npatch.share.PatchConfig
 import nkbe.util.NPackageManager
 import nkbe.util.NPackageManager.AppInfo
+import org.lsposed.patch.util.ApkSignatureHelper
 import org.lsposed.patch.util.Logger
 
 class NewPatchViewModel : ViewModel() {
@@ -34,6 +38,8 @@ class NewPatchViewModel : ViewModel() {
         data class ConfigurePatch(val app: AppInfo) : ViewAction()
         object SubmitPatch : ViewAction()
         object LaunchPatch : ViewAction()
+        object ConfirmMissingSignature : ViewAction()
+        object DismissMissingSignature : ViewAction()
     }
 
     var patchState by mutableStateOf(PatchState.INIT)
@@ -52,6 +58,12 @@ class NewPatchViewModel : ViewModel() {
     var useNPatchGms by mutableStateOf(false)
     var overrideTargetSdk by mutableStateOf(false)
     var overrideTargetSdkValue by mutableStateOf("28")
+    var signV1 by mutableStateOf(false)
+    // Shown when the input apk has no readable original signature and sig-bypass is on; the user must
+    // confirm before we patch without signature spoofing. pendingConfig holds the built config while
+    // we wait for that answer.
+    var missingSignaturePrompt by mutableStateOf(false)
+    private var pendingConfig: PatchConfig? = null
     var embeddedModules = emptyList<AppInfo>()
 
     lateinit var patchApp: AppInfo
@@ -86,6 +98,13 @@ class NewPatchViewModel : ViewModel() {
                 is ViewAction.ConfigurePatch -> configurePatch(action.app)
                 is ViewAction.SubmitPatch -> submitPatch()
                 is ViewAction.LaunchPatch -> launchPatch()
+                is ViewAction.ConfirmMissingSignature -> {
+                    missingSignaturePrompt = false
+                    startPatch(allowMissingSignature = true)
+                }
+                is ViewAction.DismissMissingSignature -> {
+                    missingSignaturePrompt = false
+                }
             }
         }
     }
@@ -101,17 +120,37 @@ class NewPatchViewModel : ViewModel() {
         newPackageName = app.app.packageName
     }
 
-    private fun submitPatch() {
+    private suspend fun submitPatch() {
         Log.d(TAG, "Submit Patch")
         if (useManager) embeddedModules = emptyList()
         val installerSource = getInstallerSource(patchApp.app.packageName)
-        val config = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue.toIntOrNull()?.takeIf { it > 0 } ?: 28)
+        pendingConfig = PatchConfig(useManager, debuggable, overrideVersionCode, sigBypassLevel, null, null, injectProvider, mirrorMode, outputLog, newPackageName, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue.toIntOrNull()?.takeIf { it > 0 } ?: 28, signV1)
+        // With sig-bypass on, NPatch must read the input's original signature to spoof it. An unsigned
+        // or broken-signature input (e.g. an unsigned ReVanced repackage) makes that read fail and the
+        // patch aborts with "get original signature failed". Detect it up front and ask the user
+        // instead of silently continuing — some apps verify their own signature and misbehave once
+        // spoofing is off.
+        if (sigBypassLevel > Constants.SIGBYPASS_LV_DISABLE) {
+            val sig = withContext(Dispatchers.IO) {
+                runCatching { ApkSignatureHelper.getApkSignInfo(patchApp.app.sourceDir) }.getOrNull()
+            }
+            if (sig.isNullOrEmpty()) {
+                missingSignaturePrompt = true
+                return
+            }
+        }
+        startPatch(allowMissingSignature = false)
+    }
+
+    private fun startPatch(allowMissingSignature: Boolean) {
+        val config = pendingConfig ?: return
         patchOptions = Patcher.Options(
             newPackageName = newPackageName,
             injectDex = injectDex,
             config = config,
             apkPaths = listOf(patchApp.app.sourceDir) + (patchApp.app.splitSourceDirs ?: emptyArray()),
-            embeddedModules = embeddedModules.flatMap { listOf(it.app.sourceDir) + (it.app.splitSourceDirs ?: emptyArray()) }
+            embeddedModules = embeddedModules.flatMap { listOf(it.app.sourceDir) + (it.app.splitSourceDirs ?: emptyArray()) },
+            allowMissingSignature = allowMissingSignature
         )
         patchState = PatchState.PATCHING
     }

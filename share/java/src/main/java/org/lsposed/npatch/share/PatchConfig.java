@@ -18,6 +18,11 @@ public class PatchConfig {
     public final boolean useNPatchGms;
     public final boolean overrideTargetSdk;
     public final int overrideTargetSdkValue;
+    // Compatibility: additionally emit a v1 (JAR) signature. Off by default — NPatch signs v2+v3 and
+    // tells apksig minSdk>=24 so it won't demand v1. Turn on for inputs that need a v1 block (very
+    // low real minSdk, or an app/loader that reads the v1 JAR signature). v2+v3 are always emitted;
+    // this only ADDS v1, never replaces them. Persisted so a re-patch keeps the user's choice.
+    public final boolean signV1;
 
     public PatchConfig(
             boolean useManager,
@@ -33,7 +38,8 @@ public class PatchConfig {
             String installerSource,
             boolean useNPatchGms,
             boolean overrideTargetSdk,
-            int overrideTargetSdkValue
+            int overrideTargetSdkValue,
+            boolean signV1
     ) {
         this.useManager = useManager;
         this.debuggable = debuggable;
@@ -51,5 +57,6 @@ public class PatchConfig {
         this.useNPatchGms = useNPatchGms;
         this.overrideTargetSdk = overrideTargetSdk;
         this.overrideTargetSdkValue = overrideTargetSdkValue;
+        this.signV1 = signV1;
     }
 }

@@ -93,6 +93,11 @@
     <string name="patch_lv4_incompatible_text">当前应用自带 seccomp 沙箱(Gecko/Chromium 引擎)。lv4 的 seccomp 过滤器会与其冲突,通常导致应用崩溃。lv3 不使用 seccomp,对这类应用可正常工作。是否回退到 lv3?</string>
     <string name="patch_lv4_fallback_lv3">使用 lv3</string>
     <string name="patch_lv4_force">仍用 lv4</string>
+    <string name="patch_sign_v1">补 v1(JAR)签名</string>
+    <string name="patch_sign_v1_desc">默认关闭:只签 v2+v3。仅当应用缺少 v1 签名就装不上/跑不起来时才开启(很老的应用,或会读取 v1 JAR 签名的应用)。v2+v3 始终保留。</string>
+    <string name="patch_missing_sig_title">无法读取原始签名</string>
+    <string name="patch_missing_sig_text">读不到此应用的原始签名——它可能未签名,或是被重打包(如 ReVanced)且签名已损坏的 apk。仍可修补,但该应用的签名伪装将关闭,校验自身签名的应用可能异常。是否继续?</string>
+    <string name="patch_missing_sig_continue">仍然修补</string>
     <string name="manage_lv4_incompatible_warning">lv4 可能与此应用不兼容——若崩溃请用 lv3 重新签名</string>
     <string name="manage_resign_lv3">使用 lv3 重新签名</string>
     <string name="manage_convert_to_local">转换为本地模式</string>

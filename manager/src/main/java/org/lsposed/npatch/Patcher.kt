@@ -22,7 +22,10 @@ object Patcher {
         private val injectDex: Boolean,
         private val config: PatchConfig,
         private val apkPaths: List<String>,
-        private val embeddedModules: List<String>?
+        private val embeddedModules: List<String>?,
+        // Transient (not persisted in PatchConfig): set only after the user confirms patching an
+        // input whose original signature can't be read. See NewPatchViewModel.
+        private val allowMissingSignature: Boolean = false
     ) {
         fun toStringArray(): Array<String> {
             return buildList {
@@ -54,6 +57,8 @@ object Patcher {
                     add("--originalSignature"); add(config.originalSignature)
                 }
                 if (config.useNPatchGms) add("--useNPatchGms")
+                if (config.signV1) add("--sign-v1")
+                if (allowMissingSignature) add("--allow-missing-signature")
                 if (!MyKeyStore.useDefault) {
                     addAll(arrayOf("-k", MyKeyStore.file.path, Configs.keyStorePassword, Configs.keyStoreAlias, Configs.keyStoreAliasPassword))
                 }

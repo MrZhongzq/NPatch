@@ -316,6 +316,24 @@ private fun ConfiguringFab() {
             }
         )
     }
+
+    if (viewModel.missingSignaturePrompt) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dispatch(ViewAction.DismissMissingSignature) },
+            title = { Text(stringResource(R.string.patch_missing_sig_title)) },
+            text = { Text(stringResource(R.string.patch_missing_sig_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dispatch(ViewAction.ConfirmMissingSignature)
+                }) { Text(stringResource(R.string.patch_missing_sig_continue)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.dispatch(ViewAction.DismissMissingSignature)
+                }) { Text(stringResource(android.R.string.cancel)) }
+            }
+        )
+    }
 }
 
 @Composable
@@ -435,6 +453,13 @@ private fun PatchOptionsBody(modifier: Modifier, onAddEmbed: () -> Unit) {
             icon = Icons.Outlined.Layers,
             title = stringResource(R.string.patch_override_target_sdk),
             desc = stringResource(R.string.patch_override_target_sdk_desc)
+        )
+        SettingsCheckBox(
+            modifier = Modifier.clickable { viewModel.signV1 = !viewModel.signV1 },
+            checked = viewModel.signV1,
+            icon = Icons.Outlined.Layers,
+            title = stringResource(R.string.patch_sign_v1),
+            desc = stringResource(R.string.patch_sign_v1_desc)
         )
         var bypassExpanded by remember { mutableStateOf(false) }
         AnywhereDropdown(

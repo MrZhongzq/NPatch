@@ -131,6 +131,12 @@ public class NPatch {
     @Parameter(names = {"--useNPatchGms"}, description = "Redirect GMS calls to NPatch built-in MicroG")
     private boolean useNPatchGms = false;
 
+    @Parameter(names = {"--sign-v1"}, description = "Also emit a v1 (JAR) signature. Off by default: sign v2+v3 only and tell apksig minSdk>=24 so it won't require v1 (the app's real manifest minSdk is never changed). Turn on for inputs that need a v1 block. v2+v3 are always emitted regardless.")
+    private boolean signV1 = false;
+
+    @Parameter(names = {"--allow-missing-signature"}, description = "When the original signature can't be read from the input apk (unsigned / broken-signature repackaged apks), proceed without it instead of failing. Signature spoofing is disabled for this app. The manager sets this only after the user confirms.")
+    private boolean allowMissingSignature = false;
+
     @Parameter(names = {"-m", "--embed"}, description = "Embed provided modules to apk")
     private List<String> modules = new ArrayList<>();
 
@@ -226,6 +232,16 @@ public class NPatch {
      * minSdk lets apksig emit the correct scheme set — notably a v1 (JAR) signature when minSdk<24,
      * which a hardcoded minSdk=27 would drop, making the patched apk uninstallable on Android 5-6.
      */
+    // apksig requires a v1 signature when minSdk < 24. When we intentionally sign v2/v3-only (signV1
+    // off, the default), pass an effective floor of 24 so apksig won't demand v1 — WITHOUT touching
+    // the app's real manifest minSdk. NPatch/upstream target Android 10+ where v2/v3 always verify,
+    // and the manager's INSTALL_BYPASS_LOW_TARGET_SDK flag handles the low-target install path. With
+    // --sign-v1 the real minSdk is used so the v1 block properly covers pre-24 too.
+    private int signingMinSdk(ZFile srcZFile) {
+        int min = readMinSdk(srcZFile);
+        return signV1 ? min : Math.max(min, 24);
+    }
+
     private int readMinSdk(ZFile srcZFile) {
         try {
             var manifestEntry = srcZFile.get(ANDROID_MANIFEST_XML);
@@ -259,8 +275,8 @@ public class NPatch {
                     keystoreArgs.get(2),
                     new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
             new SigningExtension(SigningOptions.builder()
-                    .setMinSdkVersion(readMinSdk(srcZFile))
-                    .setV1SigningEnabled(true)
+                    .setMinSdkVersion(signingMinSdk(srcZFile))
+                    .setV1SigningEnabled(signV1)
                     .setV2SigningEnabled(true)
                     .setV3SigningEnabled(true)
                     .setCertificates((X509Certificate[]) entry.getCertificateChain())
@@ -324,8 +340,8 @@ public class NPatch {
                 }
                 var entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(keystoreArgs.get(2), new KeyStore.PasswordProtection(keystoreArgs.get(3).toCharArray()));
                 new SigningExtension(SigningOptions.builder()
-                        .setMinSdkVersion(readMinSdk(srcZFile))
-                        .setV1SigningEnabled(true)
+                        .setMinSdkVersion(signingMinSdk(srcZFile))
+                        .setV1SigningEnabled(signV1)
                         .setV2SigningEnabled(true)
                         .setV3SigningEnabled(true)
                         .setCertificates((X509Certificate[]) entry.getCertificateChain())
@@ -348,9 +364,19 @@ public class NPatch {
                 } else {
                     originalSignature = ApkSignatureHelper.getApkSignInfo(srcApkFile.getAbsolutePath());
                     if (originalSignature == null || originalSignature.isEmpty()) {
-                        throw new PatchError("get original signature failed");
+                        if (!allowMissingSignature) {
+                            throw new PatchError("get original signature failed");
+                        }
+                        // Unsigned / broken-signature input the user chose to patch anyway: proceed
+                        // with no original signature. SigBypass treats a null originalSignature as
+                        // "don't spoof", which is correct here (there is no genuine signature to
+                        // preserve). Apps that verify their own signature may misbehave — the user
+                        // was warned and confirmed in the manager.
+                        originalSignature = null;
+                        logger.i("Original signature unreadable; continuing without signature spoofing (--allow-missing-signature)");
+                    } else {
+                        logger.d("Original signature\n" + originalSignature);
                     }
-                    logger.d("Original signature\n" + originalSignature);
                 }
             }
 
@@ -405,7 +431,7 @@ public class NPatch {
 
             logger.i("Patching apk...");
             // modify manifest
-            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue);
+            final var config = new PatchConfig(useManager, debuggableFlag, overrideVersionCode, sigbypassLevel, originalSignature, appComponentFactory, isInjectProvider, isMirrorMode, outputLog, newPackage, installerSource, useNPatchGms, overrideTargetSdk, overrideTargetSdkValue, signV1);
             final var configBytes = GSON.toJson(config).getBytes(StandardCharsets.UTF_8);
             final var metadata = Base64.getEncoder().encodeToString(configBytes);
             try (var is = new ByteArrayInputStream(modifyManifestFile(manifestEntry.open(), metadata, minSdkVersion, pair.packageName, newPackage, originalSignature))) {
